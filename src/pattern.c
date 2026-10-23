@@ -1,9 +1,10 @@
 /*
  * pattern.c - turn raw PATTERN strings into something the scanners can use.
  *
- * Nibble mode:  "68 65 .. 6f"  ->  per-byte value/mask pairs.  A '.' is a
+ * Nibble mode:  "68 65 .. 6f"  ->  packed value/mask pairs.  A '.' is a
  *               wildcard for one hex digit, so "6." matches 0x60-0x6f and
- *               ".." matches any byte.  Whitespace is ignored.
+ *               ".." matches any byte.  Whitespace is ignored.  An even
+ *               number of digits is required unless --half-byte is given.
  *
  * Regex modes:  the data is rendered as lowercase hex text and the pattern
  *               is a POSIX regex over that text (see scan.c).  Whitespace is
@@ -23,7 +24,7 @@ static int hexval(int c)
 	return (c | 0x20) - 'a' + 10;		/* caller checked isxdigit() */
 }
 
-static void compile_nibble(Pattern *p, const char *text)
+static void compile_nibble(Pattern *p, const char *text, int half_byte)
 {
 	size_t  cap = strlen(text) / 2 + 1;
 	size_t  nn  = 0;			/* nibbles seen */
@@ -70,9 +71,10 @@ static void compile_nibble(Pattern *p, const char *text)
 
 	if (nn == 0)
 		die("empty pattern");
-	if (nn % 2 != 0)
-		die("malformed pattern '%s': odd number of hex digits", text);
-	p->len = nn / 2;
+	if (nn % 2 != 0 && !half_byte)
+		die("malformed pattern '%s': odd number of hex digits "
+		    "(see --half-byte)", text);
+	p->nibs = nn;
 }
 
 static void compile_regex(Pattern *p, const char *text, Mode mode)
@@ -99,7 +101,7 @@ static void compile_regex(Pattern *p, const char *text, Mode mode)
 		die("bad regular expression '%s': %s", text, msg);
 	}
 	free(clean);
-	p->len = 0;
+	p->nibs = 0;
 }
 
 /* Compile every pattern in 'raw'; *out is an array of *n Patterns. */
@@ -113,7 +115,7 @@ void compile_patterns(const Config *cfg, const StrList *raw,
 	{
 		memset(&pats[i], 0, sizeof(pats[i]));
 		if (cfg->mode == MODE_NIBBLE)
-			compile_nibble(&pats[i], raw->item[i]);
+			compile_nibble(&pats[i], raw->item[i], cfg->half_byte);
 		else
 			compile_regex(&pats[i], raw->item[i], cfg->mode);
 	}

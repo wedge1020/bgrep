@@ -6,9 +6,26 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "bgrep.h"
+
+/*
+ * Digits needed to print any offset of a regular file in the output base;
+ * for pipes and other unsized input assume offsets below 4 GiB.
+ */
+static int auto_pad_width(const Config *cfg, FILE *fp)
+{
+	struct stat st;
+	ulli        last = 0xFFFFFFFFULL;
+
+	if (fstat(fileno(fp), &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0)
+		last = (ulli) st.st_size - 1;
+	if (last < cfg->start_offset)
+		last = cfg->start_offset;
+	return number_width(last, cfg_out_base(cfg, 0));
+}
 
 int main(int argc, char **argv)
 {
@@ -56,7 +73,10 @@ int main(int argc, char **argv)
 		sink.cfg       = &cfg;
 		sink.name      = is_stdin ? cfg.label : files[i];
 		sink.show_name = cfg.with_filename;
+		sink.pad_width = cfg.pad > 0 ? cfg.pad : 0;
 		sink.count     = 0;
+		sink.scratch     = NULL;
+		sink.scratch_cap = 0;
 
 		if (fp == NULL)
 		{
@@ -65,6 +85,9 @@ int main(int argc, char **argv)
 			continue;
 		}
 
+		if (cfg.pad < 0)			/* --pad-output: widest offset in this file */
+			sink.pad_width = auto_pad_width(&cfg, fp);
+
 		if (scan_file(fp, pats, np, &sink) != 0)
 		{
 			warn("%s: %s", sink.name, errno ? strerror(errno) : "read error");
@@ -72,6 +95,7 @@ int main(int argc, char **argv)
 		}
 		if (!is_stdin)
 			fclose(fp);
+		free(sink.scratch);
 
 		if (cfg.list == LIST_MATCHING && sink.count > 0)
 			puts(sink.name);
@@ -81,7 +105,8 @@ int main(int argc, char **argv)
 		{
 			if (sink.show_name)
 				printf("%s:", sink.name);
-			printf("%llu\n", sink.count);
+			put_number(&cfg, sink.count, cfg_out_base(&cfg, 1), 0, 0);
+			putchar('\n');
 		}
 
 		if (cfg.list == LIST_NONMATCHING ? sink.count == 0 : sink.count > 0)

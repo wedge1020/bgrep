@@ -16,7 +16,9 @@ void display_help(void)
 	printf("  -G, --basic-regexp           PATTERN is a POSIX basic regex over hex text\n");
 	printf("  -E, --extended-regexp        PATTERN is a POSIX extended regex over hex text\n");
 	printf("  -e, --regexp=PATTERN         use PATTERN (may be given more than once)\n");
-	printf("  -f, --file=FILE              read patterns from FILE, one per line\n\n");
+	printf("  -f, --file=FILE              read patterns from FILE, one per line\n");
+	printf("      --half-byte              match on half-byte (nibble) boundaries\n");
+	printf("  -s, --starting-offset=N      begin searching at byte offset N\n\n");
 
 	printf("Output control:\n");
 	printf("  -c, --count                  print only a count of matches per file\n");
@@ -29,6 +31,30 @@ void display_help(void)
 	printf("  -H, --with-filename          prefix matches with the file name\n");
 	printf("  -h, --no-filename            do not prefix matches with the file name\n");
 	printf("      --label=LABEL            name to show for standard input\n\n");
+
+	printf("Offset reporting and number formats:\n");
+	printf("      --first-byte[-with-prefix]   report offset of first match/context byte\n");
+	printf("      --last-byte[-with-suffix]    report offset of last match/context byte\n");
+	printf("      --auto-mode              numbers: 0x/0 prefixes honoured (default)\n");
+	printf("      --hex-mode, --oct-mode, --dec-mode   read and print numbers in that base\n");
+	printf("      --[no-]hex-prefix        print offsets with a leading 0x\n");
+	printf("      --[no-]hex-suffix        print offsets with a trailing h\n");
+	printf("  -p[N], --pad-output[=N]      zero-pad offsets (to N digits, or to file size)\n");
+	printf("      --no-pad-output          do not pad offsets (default)\n\n");
+
+	printf("Context and display:\n");
+	printf("  -B, --before-bytes=N         also show N bytes before each match\n");
+	printf("  -A, --after-bytes=N          also show N bytes after each match\n");
+	printf("  -P, --prefix-num-bytes=K     show as many bytes before as match byte K says\n");
+	printf("  -S, --suffix-num-bytes=K     show as many bytes after as match byte K says\n");
+	printf("  -O, --off-by=[+|-]N          adjust the -P/-S counts by N\n");
+	printf("      --ascii                  append an ASCII rendering\n");
+	printf("  -g, --group-size=N           show bytes in groups of N\n");
+	printf("      --little-endian-group    show each group last byte first\n");
+	printf("      --big-endian-group       show each group in stream order (default)\n");
+	printf("      --byte-reverse-group     reverse the byte order of each group\n");
+	printf("      --bit-reverse-group      reverse every bit of each group\n");
+	printf("  -I, --invert-byte=K[,K...]   bit-invert match byte(s) K when printing\n\n");
 
 	printf("Miscellaneous:\n");
 	printf("      --help                   display this help and exit\n");

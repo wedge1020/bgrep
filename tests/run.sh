@@ -51,7 +51,7 @@ check "odd digits rejected"      "" 2 "$BG" 'abc' "$T/a.bin"
 check "bad symbol rejected"      "" 2 "$BG" 'zz' "$T/a.bin"
 check "missing file"             "" 2 "$BG" 'ab' "$T/nonexistent"
 check "no args"                  "" 2 "$BG"
-check "unimplemented option"     "" 2 "$BG" --ascii 'ab' "$T/b.bin"
+check "unimplemented option"     "" 2 "$BG" --input-byte=7 'ab' "$T/b.bin"
 check "ERE alternation"          "2:68 65 6c 6c
 a:68 65 6c 70
 f:68 65 6c 6c" 0 "$BG" -E '68656c(6c|70)' "$T/a.bin"
@@ -75,6 +75,86 @@ check "chunk boundary (ERE)"     "ffff:de ad be ef" 0 "$BG" -E 'deadbeef' "$T/bi
 : > "$T/empty"
 check "empty file"               "" 1 "$BG" 'ab' "$T/empty"
 check "directory"                "" 2 "$BG" 'ab' "$T"
+
+
+# ---- step 5: offset formatting -------------------------------------------
+printf '\101\102\003\252\273\314\335\356' > "$T/r.bin"        # AB 03 aa bb cc dd ee
+printf '\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\377' > "$T/o.bin"  # ff at 16
+printf '\000\000\000\377\000\000\000\000\000\000\000\000\000\000\000\000\000' > "$T/z.bin"  # ff at 3
+printf '\253\253\253\253\253\253\253\253\253\253\253\253\253\253\253\253' > "$T/s.bin"      # 16 x ab
+
+check "last-byte"                "1:41 42" 0 "$BG" --last-byte '41 42' "$T/r.bin"
+check "last-byte-with-suffix"    "3:41 42 | 03 aa" 0 "$BG" --last-byte-with-suffix -A 2 '41 42' "$T/r.bin"
+check "first-byte-with-prefix"   "1:42 03 | aa" 0 "$BG" --first-byte-with-prefix -B 2 'aa' "$T/r.bin"
+check "default hex offset"       "10:ff" 0 "$BG" ff "$T/o.bin"
+check "dec-mode offset"          "16:ff" 0 "$BG" --dec-mode ff "$T/o.bin"
+check "oct-mode offset"          "20:ff" 0 "$BG" --oct-mode ff "$T/o.bin"
+check "hex-prefix"               "0x10:ff" 0 "$BG" --hex-prefix ff "$T/o.bin"
+check "hex-suffix"               "10h:ff" 0 "$BG" --hex-suffix ff "$T/o.bin"
+check "hex-prefix+suffix"        "0x10h:ff" 0 "$BG" --hex-prefix --hex-suffix ff "$T/o.bin"
+check "prefix ignored in dec"    "16:ff" 0 "$BG" --dec-mode --hex-prefix ff "$T/o.bin"
+check "pad explicit"             "0010:ff" 0 "$BG" -p4 ff "$T/o.bin"
+check "pad auto (size)"          "03:ff" 0 "$BG" -p ff "$T/z.bin"
+check "no-pad"                   "3:ff" 0 "$BG" -p4 --no-pad-output ff "$T/z.bin"
+check "count default decimal"    "16" 0 "$BG" -c ab "$T/s.bin"
+check "count hex-mode"           "10" 0 "$BG" -c --hex-mode ab "$T/s.bin"
+check "count oct-mode"           "20" 0 "$BG" -c --oct-mode ab "$T/s.bin"
+check "ascii column"             "2:68 65 6c 6c 6f  |hello|" 0 "$BG" --ascii -m1 '68 65 6c 6c 6f' "$T/a.bin"
+check "ascii non-printable"      "0:41 42 03  |AB.|" 0 "$BG" --ascii '41 42 03' "$T/r.bin"
+
+# ---- step 6: context and start offset ------------------------------------
+check "-A"                       "0:41 42 | 03 aa" 0 "$BG" -A 2 '41 42' "$T/r.bin"
+check "-B"                       "3:42 03 | aa" 0 "$BG" -B 2 'aa' "$T/r.bin"
+check "-A and -B"                "3:03 | aa | bb" 0 "$BG" -B 1 -A 1 'aa' "$T/r.bin"
+check "context clipped at edges" "0:41 42" 0 "$BG" -B 10 '41 42' "$T/r.bin"
+check "context clipped at EOF"   "7:ee" 0 "$BG" -A 10 'ee' "$T/r.bin"
+check "-S from match byte"       "0:41 42 03 | aa bb cc" 0 "$BG" -S 3 '41 42 ..' "$T/r.bin"
+check "-S with -O +1"            "0:41 42 03 | aa bb cc dd" 0 "$BG" -S 3 -O +1 '41 42 ..' "$T/r.bin"
+check "-S with bare -O (minus)"  "0:41 42 03 | aa bb" 0 "$BG" -S 3 -O 1 '41 42 ..' "$T/r.bin"
+check "-P from match byte"       "2:41 42 | 03 aa" 0 "$BG" -P 1 '03 aa' "$T/r.bin"
+check "-S beyond match ignored"  "0:41 42" 0 "$BG" -S 9 '41 42' "$T/r.bin"
+check "-s start offset"          "5:cc" 0 "$BG" -s 4 cc "$T/r.bin"
+check "-s past match"            "" 1 "$BG" -s 6 cc "$T/r.bin"
+check "-s on a pipe"             "5:cc" 0 sh -c "cat '$T/r.bin' | '$BG' -s 4 cc"
+check "-s hex-mode"              "5:cc" 0 "$BG" --hex-mode -s 4 cc "$T/r.bin"
+check "-s 0x prefix"             "5:cc" 0 "$BG" -s 0x4 cc "$T/r.bin"
+check "-s regex"                 "5:cc" 0 "$BG" -E -s 4 cc "$T/r.bin"
+check "context across chunks"    "ffff:00 00 00 | de ad be ef | 00 00 00" 0 "$BG" -B 3 -A 3 'de ad be ef' "$T/big.bin"
+check "context across (ERE)"     "ffff:00 00 00 | de ad be ef | 00 00 00" 0 "$BG" -E -B 3 -A 3 'deadbeef' "$T/big.bin"
+check "-S across chunks"         "ffff:de ad be ef | 00 00 00 00" 0 "$BG" -S 4 -O 235 'de ad be ef' "$T/big.bin"
+
+# ---- step 7: byte transforms ---------------------------------------------
+check "invert 1"                 "0:be 42" 0 "$BG" -I 1 '41 42' "$T/r.bin"
+check "invert list"              "0:be bd" 0 "$BG" -I 1,2 '41 42' "$T/r.bin"
+check "invert repeated -I"       "0:be bd" 0 "$BG" -I 1 -I 2 '41 42' "$T/r.bin"
+check "invert out of range"      "0:41 42" 0 "$BG" -I 9 '41 42' "$T/r.bin"
+check "invert keeps ascii raw"   "0:be 42  |AB|" 0 "$BG" -I 1 --ascii '41 42' "$T/r.bin"
+check "group 2"                  "2:6865 6c6c 6f" 0 "$BG" -g 2 -m1 '68 65 6c 6c 6f' "$T/a.bin"
+check "little-endian group"      "2:6568 6c6c 6f" 0 "$BG" -g 2 --little-endian-group -m1 '68 65 6c 6c 6f' "$T/a.bin"
+check "byte-reverse group"       "2:6568 6c6c 6f" 0 "$BG" -g 2 --byte-reverse-group -m1 '68 65 6c 6c 6f' "$T/a.bin"
+check "LE + byte-reverse"        "2:6865 6c6c 6f" 0 "$BG" -g 2 --little-endian-group --byte-reverse-group -m1 '68 65 6c 6c 6f' "$T/a.bin"
+check "big-endian overrides"     "2:6865 6c6c 6f" 0 "$BG" -g 2 --little-endian-group --big-endian-group -m1 '68 65 6c 6c 6f' "$T/a.bin"
+printf '\360\001' > "$T/bits.bin"
+check "bit-reverse 1-byte group" "0:0f 80" 0 "$BG" --bit-reverse-group 'f0 01' "$T/bits.bin"
+check "bit-reverse 2-byte group" "0:800f" 0 "$BG" -g 2 --bit-reverse-group 'f0 01' "$T/bits.bin"
+check "group applies to context" "4:03aa | bb | ccdd" 0 "$BG" -g 2 -B 2 -A 2 'bb' "$T/r.bin"
+check "bad group size"           "" 2 "$BG" -g 0 ab "$T/b.bin"
+check "huge group size"          "" 2 "$BG" -g 99999 ab "$T/b.bin"
+check "bad number"               "" 2 "$BG" -m x ab "$T/b.bin"
+check "negative number"          "" 2 "$BG" -s -1 ab "$T/b.bin"
+check "option order irrelevant"  "10:ff" 0 "$BG" -s 0x10 --hex-mode ff "$T/o.bin"
+
+# ---- half-byte matching --------------------------------------------------
+check "half-byte odd offset"     "2.5:86 56" 0 "$BG" --half-byte -m1 8656 "$T/a.bin"
+check "half-byte odd digits"     "2.5:86 5" 0 "$BG" --half-byte -m1 865 "$T/a.bin"
+check "half-byte wildcard"       "2.5:86 5" 0 "$BG" --half-byte -m1 '8.5' "$T/a.bin"
+check "half-byte aligned"        "2:68 65" 0 "$BG" --half-byte -m1 6865 "$T/a.bin"
+check "half-byte ERE"            "2.5:86 56" 0 "$BG" --half-byte -E -m1 8656 "$T/a.bin"
+check "half-byte last offset"    "4:86 56" 0 "$BG" --half-byte --last-byte -m1 8656 "$T/a.bin"
+check "odd digits need flag"     "" 2 "$BG" 865 "$T/a.bin"
+check "half-byte + -A rejected"  "" 2 "$BG" --half-byte -A 1 865 "$T/a.bin"
+check "half-byte + ascii"        "" 2 "$BG" --half-byte --ascii 865 "$T/a.bin"
+check "half-byte + -I"           "" 2 "$BG" --half-byte -I 1 865 "$T/a.bin"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
