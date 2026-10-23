@@ -1,93 +1,110 @@
-#ifndef _BGREP_H
-#define _BGREP_H
+/*
+ * bgrep.h - shared types and prototypes for bgrep, the binary grep.
+ *
+ * Copyright (C) 2015-2026 Matthew Haas.  GPLv3+; see the LICENSE file.
+ */
+#ifndef BGREP_H
+#define BGREP_H
 
+#include <regex.h>
+#include <stddef.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
-#define  BGREP_AUTHOR           "Matthew Haas"
-#define  BGREP_COPYRIGHT        "2015"
-#define  BGREP_EMAIL            "wedge1020+bgrep@gmail.com"
-#define  BGREP_URL              "http://lab46.corning-cc.edu/projects/bgrep"
-#define  BGREP_VERSION          "0.2"
+#define BGREP_AUTHOR     "Matthew Haas"
+#define BGREP_COPYRIGHT  "2015-2026"
+#define BGREP_EMAIL      "wedge1020+bgrep@gmail.com"
+#define BGREP_URL        "https://github.com/wedge1020/bgrep"
+#define BGREP_VERSION    "0.3"
 
-#define  QUIET                  1
-#define  SHOWSTARTOFFSET        2
-#define  COUNT                  4
-#define  FILENAME               8
-#define  OFFSET                 16
-#define  ASCII                  32
-#define  HEXLEAD                64
-#define  HEXTAIL                128
-#define  PADOFFSET              256
-#define  INVERT                 512
-#define  BIGENDIAN              1024
-#define  REVERSE                2048
-#define  FIRSTPREFIX            4096
-#define  LASTSUFFIX             8192
-#define  FILES_MATCH            16384
-#define  SET_BASE               32768
+/* Exit statuses, as documented in bgrep(1). */
+#define BG_MATCH         0		/* something matched */
+#define BG_NOMATCH       1		/* nothing matched */
+#define BG_ERROR         2		/* an error occurred */
 
-typedef signed char             sc;
-typedef unsigned char           uc;
-typedef unsigned short int      usi;
-typedef unsigned long long int  ulli;
+typedef unsigned char          uc;
+typedef unsigned long long int ulli;
 
-struct infile  {
-	FILE                       *input;
-	char                       *name;
-	struct infile              *next;
-};
-typedef struct infile           Infile;
+/* How PATTERNs are interpreted. */
+typedef enum
+{
+	MODE_NIBBLE,		/* hex digits and '.' wildcards (default, streamed) */
+	MODE_BRE,			/* POSIX basic regex over the hex text of the data */
+	MODE_ERE			/* POSIX extended regex over the hex text of the data */
+} Mode;
 
-Infile                         *inFileList;
-Infile                         *inFileListEnd;
+typedef enum
+{
+	LIST_NONE,			/* normal output */
+	LIST_MATCHING,		/* -l: print names of files with a match */
+	LIST_NONMATCHING	/* -L: print names of files without a match */
+} ListMode;
 
-struct invert  {
-	ulli                        num;
-	struct invert              *next;
-};
-typedef struct invert           InvertByte;
+/* Run-time settings, filled in by parse_args(). */
+typedef struct
+{
+	Mode          mode;
+	ListMode      list;
+	int           count_only;		/* -c */
+	int           quiet;			/* -q */
+	int           show_offset;		/* -b / --no-byte-offset */
+	int           with_filename;	/* -H / -h; -1 means "decide by file count" */
+	ulli          max_count;		/* -m; 0 means unbounded */
+	const char   *label;			/* name shown for standard input */
+} Config;
 
-InvertByte                     *invByteList;
-InvertByte                     *invByteListEnd;
+/* A growable list of strings (raw PATTERN text). */
+typedef struct
+{
+	char        **item;
+	size_t        count;
+	size_t        cap;
+} StrList;
 
-struct pattern {
-	uc                         *regex;
-	usi                         len;
-	struct pattern             *next;
-};
-typedef struct pattern          Pattern;
+/*
+ * A compiled pattern.  In MODE_NIBBLE, byte i of the input matches when
+ * (byte & mask[i]) == value[i]; mask nibbles are 0xF for a literal hex
+ * digit and 0x0 for a '.' wildcard.  In the regex modes, 're' is compiled.
+ */
+typedef struct
+{
+	size_t        len;				/* bytes matched (nibble mode only) */
+	uc           *value;
+	uc           *mask;
+	regex_t       re;
+} Pattern;
 
-Pattern                        *patternList;
-Pattern                        *patternListEnd;
+/* Per-file reporting state, shared between the scanners and emit(). */
+typedef struct
+{
+	const Config *cfg;
+	const char   *name;
+	int           show_name;
+	ulli          count;
+} Sink;
 
-struct settings {
-	FILE                       *output;				// where to send output
-	sc                          stdin_in;           // are we reading from stdin at all?
-	sc                          off_by;
-	uc                          pad_value;
-	uc                         *label;
-	uc                          base;
-	uc                          input_byte_size;
-	uc                          output_byte_size;
-	ulli                        offset;				// starting offset
-	ulli                        prefix_bytes;		// additional bytes to include prior to offset
-	ulli                        suffix_bytes;		// additional bytes to include after offset
-	ulli                        max_count;			// maximum matches to display (0 for unbounded)
-	ulli                        num_input;
-	usi                         flags;				// operational modes
-};
-typedef struct settings         config;
+extern const char *progname;
 
-config                          CFG;
+/* util.c */
+void   die(const char *, ...);
+void   warn(const char *, ...);
+void  *xmalloc(size_t);
+void  *xrealloc(void *, size_t);
+char  *xstrdup(const char *);
+void   strlist_add(StrList *, const char *);
 
-void args(int, char **);
-void check_patterns(int, char **);
-void display_help(char *);
-void display_usage(char *);
-void display_version(char *);
-void init(void);
-void load_file(char *);
+/* args.c */
+int    parse_args(int, char **, Config *, StrList *);
+
+/* pattern.c */
+void   compile_patterns(const Config *, const StrList *, Pattern **, size_t *);
+
+/* scan.c */
+int    emit(Sink *, ulli, const uc *, size_t);
+int    scan_file(FILE *, const Pattern *, size_t, Sink *);
+
+/* help.c, usage.c, version.c */
+void   display_help(void);
+void   display_usage(void);
+void   display_version(void);
 
 #endif

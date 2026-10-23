@@ -1,379 +1,174 @@
+/*
+ * args.c - command-line parsing.
+ *
+ * Options that the manual page describes but that are not implemented yet
+ * (offset formatting, context bytes, byte transforms) are still recognised,
+ * so that they fail with a clear message instead of "unrecognized option".
+ */
+#include <errno.h>
 #include <getopt.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "bgrep.h"
 
-#define ARG_YES		2
-#define ARG_MAYBE	1
-#define ARG_NO   	0
-
-void args(int argc, char **argv)
+enum
 {
-	int            c                             = 0;
-	int            digit_optind                  = 0;
-	int            this_option_optind            = 0;
-	int            option_index                  = 0;
-	char          *save                          = NULL;
-	char          *token                         = NULL;
+	OPT_HELP = 256,
+	OPT_NO_OFFSET,
+	OPT_LABEL,
+	OPT_UNIMPLEMENTED
+};
 
-	const  char   *delim                         = {           "," };
+#define SHORT_OPTS  "Ve:f:cLlm:qbHhFGEp:P:S:I:s:"
 
-	struct option  long_options[]                = {
-		{ "help",                   ARG_NO,    NULL, 1   },
-		{ "version",                ARG_NO,    NULL, 'V' },
-		{ "regexp",                 ARG_YES,   NULL, 'e' },
-		{ "file",                   ARG_YES,   NULL, 'f' },
-		{ "count",                  ARG_NO,    NULL, 'c' },
-		{ "files-without-match",    ARG_NO,    NULL, 'L' },
-		{ "files-with-matches",     ARG_NO,    NULL, 'l' },
-		{ "max-count",              ARG_YES,   NULL, 'm' },
-		{ "quiet",                  ARG_NO,    NULL, 'q' },
-		{ "byte-offset",            ARG_NO,    NULL, 'b' },
-		{ "no-byte-offset",         ARG_NO,    NULL, 2   },
-		{ "with-filename",          ARG_NO,    NULL, 'H' },
-		{ "no-filename",            ARG_NO,    NULL, 'h' },
-		{ "label",                  ARG_YES,   NULL, 3   },
-		{ "first-byte",             ARG_NO,    NULL, 4   },
-		{ "first-byte-with-prefix", ARG_NO,    NULL, 5   },
-		{ "last-byte",              ARG_NO,    NULL, 6   },
-		{ "last-byte-with-suffix",  ARG_NO,    NULL, 7   },
-		{ "auto-mode",              ARG_NO,    NULL, 8   },
-		{ "hex-mode",               ARG_NO,    NULL, 9   },
-		{ "oct-mode",               ARG_NO,    NULL, 10   },
-		{ "hex-prefix",             ARG_NO,    NULL, 11  },
-		{ "no-hex-prefix",          ARG_NO,    NULL, 12  },
-		{ "hex-suffix",             ARG_NO,    NULL, 13  },
-		{ "no-hex-suffix",          ARG_NO,    NULL, 14  },
-		{ "pad-output",             ARG_YES,   NULL, 'p' },
-		{ "no-pad-output",          ARG_NO,    NULL, 15  },
-		{ "ascii",                  ARG_NO,    NULL, 16  },
-		{ "no-ascii",               ARG_NO,    NULL, 17  },
-		{ "prefix-num-bytes",       ARG_YES,   NULL, 'P' },
-		{ "suffix-num-bytes",       ARG_YES,   NULL, 'S' },
-		{ "input-byte",             ARG_YES,   NULL, 18  },
-		{ "output-byte",            ARG_YES,   NULL, 19  },
-		{ "little-endian-group",    ARG_NO,    NULL, 20  },
-		{ "big-endian-group",       ARG_NO,    NULL, 21  },
-		{ "byte-reverse-group",     ARG_NO,    NULL, 22  },
-//		{ "bit-reverse-group",      ARG_NO,    NULL, 23  },
-		{ "invert-byte",            ARG_YES,   NULL, 'I' },
-		{ "starting-offset",        ARG_NO,    NULL, 's' },
-		{ 0,                        0,         NULL, 0   }
-	};
+static const struct option long_options[] =
+{
+	{ "help",                   no_argument,       NULL, OPT_HELP        },
+	{ "version",                no_argument,       NULL, 'V'             },
+	{ "regexp",                 required_argument, NULL, 'e'             },
+	{ "file",                   required_argument, NULL, 'f'             },
+	{ "fixed",                  no_argument,       NULL, 'F'             },
+	{ "basic-regexp",           no_argument,       NULL, 'G'             },
+	{ "extended-regexp",        no_argument,       NULL, 'E'             },
+	{ "count",                  no_argument,       NULL, 'c'             },
+	{ "files-without-match",    no_argument,       NULL, 'L'             },
+	{ "files-with-matches",     no_argument,       NULL, 'l'             },
+	{ "max-count",              required_argument, NULL, 'm'             },
+	{ "quiet",                  no_argument,       NULL, 'q'             },
+	{ "silent",                 no_argument,       NULL, 'q'             },
+	{ "byte-offset",            no_argument,       NULL, 'b'             },
+	{ "no-byte-offset",         no_argument,       NULL, OPT_NO_OFFSET   },
+	{ "with-filename",          no_argument,       NULL, 'H'             },
+	{ "no-filename",            no_argument,       NULL, 'h'             },
+	{ "label",                  required_argument, NULL, OPT_LABEL       },
 
-	c = getopt_long(argc,argv,"Ve:f:cLlm:qbHhp:P:S:I:s",long_options,&option_index);
-	while (c                                    != -1)
+	/* documented in bgrep(1), planned, not yet implemented */
+	{ "first-byte",             no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "first-byte-with-prefix", no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "last-byte",              no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "last-byte-with-suffix",  no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "auto-mode",              no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "hex-mode",               no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "oct-mode",               no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "hex-prefix",             no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "no-hex-prefix",          no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "hex-suffix",             no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "no-hex-suffix",          no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "pad-output",             optional_argument, NULL, OPT_UNIMPLEMENTED },
+	{ "no-pad-output",          no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "ascii",                  no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "no-ascii",               no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "prefix-num-bytes",       required_argument, NULL, OPT_UNIMPLEMENTED },
+	{ "suffix-num-bytes",       required_argument, NULL, OPT_UNIMPLEMENTED },
+	{ "input-byte",             required_argument, NULL, OPT_UNIMPLEMENTED },
+	{ "output-byte",            required_argument, NULL, OPT_UNIMPLEMENTED },
+	{ "little-endian-group",    no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "big-endian-group",       no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "byte-reverse-group",     no_argument,       NULL, OPT_UNIMPLEMENTED },
+	{ "invert-byte",            required_argument, NULL, OPT_UNIMPLEMENTED },
+	{ "starting-offset",        required_argument, NULL, OPT_UNIMPLEMENTED },
+	{ NULL,                     0,                 NULL, 0               }
+};
+
+/* Parse an unsigned number; accepts decimal, 0x hex and 0 octal. */
+static ulli parse_number(const char *s, const char *opt)
+{
+	char *end = NULL;
+	ulli  v;
+
+	errno = 0;
+	v     = strtoull(s, &end, 0);
+	if (end == s || *end != '\0' || errno != 0 || strchr(s, '-') != NULL)
+		die("invalid argument '%s' for %s", s, opt);
+	return v;
+}
+
+/* Read patterns, one per line, from the named file ("-" is stdin). */
+static void load_pattern_file(const char *name, StrList *pats)
+{
+	FILE   *fp   = strcmp(name, "-") == 0 ? stdin : fopen(name, "r");
+	char   *line = NULL;
+	size_t  cap  = 0;
+	ssize_t n;
+
+	if (fp == NULL)
+		die("%s: %s", name, strerror(errno));
+	while ((n = getline(&line, &cap, fp)) != -1)
 	{
-		switch(c)
+		if (n > 0 && line[n - 1] == '\n')
+			line[--n] = '\0';
+		if (n > 0 && line[n - 1] == '\r')	/* tolerate CRLF files */
+			line[--n] = '\0';
+		if (n > 0)							/* blank lines are skipped */
+			strlist_add(pats, line);
+	}
+	if (ferror(fp))
+		die("%s: read error", name);
+	free(line);
+	if (fp != stdin)
+		fclose(fp);
+}
+
+/*
+ * Parse argv into cfg and pats.  Returns the index of the first FILE
+ * argument (== argc when none were given).
+ */
+int parse_args(int argc, char **argv, Config *cfg, StrList *pats)
+{
+	int  c;
+	int  idx = 0;
+
+	cfg->mode          = MODE_NIBBLE;
+	cfg->list          = LIST_NONE;
+	cfg->count_only    = 0;
+	cfg->quiet         = 0;
+	cfg->show_offset   = 1;
+	cfg->with_filename = -1;
+	cfg->max_count     = 0;
+	cfg->label         = "(stdin)";
+
+	while ((c = getopt_long(argc, argv, SHORT_OPTS, long_options, &idx)) != -1)
+	{
+		switch (c)
 		{
-			case 1:	// help
-				display_help(argv[0]);
-				break;
+			case OPT_HELP:      display_help();                    break;
+			case 'V':           display_version();                 break;
+			case 'e':           strlist_add(pats, optarg);         break;
+			case 'f':           load_pattern_file(optarg, pats);   break;
+			case 'F':           cfg->mode = MODE_NIBBLE;           break;
+			case 'G':           cfg->mode = MODE_BRE;              break;
+			case 'E':           cfg->mode = MODE_ERE;              break;
+			case 'c':           cfg->count_only    = 1;            break;
+			case 'L':           cfg->list = LIST_NONMATCHING;      break;
+			case 'l':           cfg->list = LIST_MATCHING;         break;
+			case 'm':           cfg->max_count = parse_number(optarg, "--max-count"); break;
+			case 'q':           cfg->quiet         = 1;            break;
+			case 'b':           cfg->show_offset   = 1;            break;
+			case OPT_NO_OFFSET: cfg->show_offset   = 0;            break;
+			case 'H':           cfg->with_filename = 1;            break;
+			case 'h':           cfg->with_filename = 0;            break;
+			case OPT_LABEL:     cfg->label         = optarg;       break;
 
-			case 'V':
-				display_version(argv[0]);
+			case 'p': case 'P': case 'S': case 'I': case 's':
+				die("option '-%c' is not yet implemented", c);
 				break;
-
-			case 'e':
-				token                            = strtok_r(optarg, delim, &save);
-				while (token                    != NULL)
-				{
-					if (patternList	            == NULL)
-					{
-						patternList              = (Pattern *) malloc (sizeof(Pattern));
-						if (patternList         == NULL)
-						{
-							fprintf(CFG.output, "Error allocating memory.\n");
-							exit(1);
-						}
-						patternList    -> next   = NULL;
-						patternListEnd           = patternList;
-					}
-					else
-					{
-						patternListEnd -> next   = (Pattern *) malloc (sizeof(Pattern));
-						if(patternListEnd->next == NULL)
-						{
-							fprintf(CFG.output, "Error allocating memory.\n");
-							exit(1);
-						}
-						patternListEnd           = patternListEnd -> next;
-						patternListEnd -> next   = NULL;
-					}
-
-					patternListEnd     -> regex  = (unsigned char *) malloc (strlen(token)+1);
-					if (patternListEnd -> regex == NULL)
-					{
-						fprintf(CFG.output, "Error allocating memory.\n");
-						exit(1);
-					}
-					patternListEnd     -> regex  = (unsigned char *) memcpy (patternList -> regex, token, strlen(token)+1);
-					patternListEnd     -> len    = strlen(token);
-					token                        = strtok_r(optarg, delim, &save);
-				}
-				break;
-
-			case 'f':
-				load_file(optarg);
-				break;
-
-			case 'c':
-				CFG.flags                        = CFG.flags |  COUNT;
-				break;
-
-			case 'L':
-				CFG.flags                        = CFG.flags |  FILES_MATCH;
-				break;
-
-			case 'l':
-				CFG.flags                        = CFG.flags & ~FILES_MATCH;
-				break;
-
-			case 'm':
-				CFG.max_count                    = strtoull(optarg, NULL, CFG.base);
-				break;
-
-			case 'q':
-				CFG.output                       = fopen("/dev/null", "wb");
-				if (CFG.output                  == NULL)
-				{
-					fprintf(CFG.output, "Error opening /dev/null.\n");
-					exit(1);
-				}
-				CFG.flags                        = CFG.flags |  QUIET;
-				break;
-
-			case 'b':
-				CFG.flags                        = CFG.flags |  OFFSET;
-				break;
-
-			case 2:
-				CFG.flags                        = CFG.flags & ~OFFSET;
-				break;
-
-			case 'H':
-				CFG.flags                        = CFG.flags |  FILENAME;
-				break;
-
-			case 'h':
-				CFG.flags                        = CFG.flags & ~FILENAME;
-				break;
-
-			case 3: //label
-				CFG.label                        = (uc *) malloc (strlen(optarg)+1);
-				if (CFG.label                   == NULL)
-				{
-					fprintf(CFG.output, "Error allocating memory.\n");
-					exit(1);
-				}
-				CFG.label                        = strcpy(CFG.label, optarg);
-				break;
-
-			case 4: //first byte
-				CFG.flags                        = CFG.flags & ~FIRSTPREFIX;
-				CFG.flags                        = CFG.flags & ~LASTSUFFIX;
-				CFG.flags                        = CFG.flags |  SHOWSTARTOFFSET;
-				break;
-
-			case 5: //first byte with prefix
-				CFG.flags                        = CFG.flags |  FIRSTPREFIX;
-				CFG.flags                        = CFG.flags & ~LASTSUFFIX;
-				CFG.flags                        = CFG.flags |  SHOWSTARTOFFSET;
-				break;
-
-			case 6: //last byte
-				CFG.flags                        = CFG.flags & ~FIRSTPREFIX;
-				CFG.flags                        = CFG.flags & ~LASTSUFFIX;
-				CFG.flags                        = CFG.flags & ~SHOWSTARTOFFSET;
-				break;
-			case 7: //last byte with suffix
-				CFG.flags                        = CFG.flags & ~FIRSTPREFIX;
-				CFG.flags                        = CFG.flags |  LASTSUFFIX;
-				CFG.flags                        = CFG.flags & ~SHOWSTARTOFFSET;
-				break;
-
-			case 8:	// auto input mode (dec by default, hex/octal with prefix)
-				CFG.flags                        = CFG.flags & ~SET_BASE;
-				CFG.base                         = 0;
-				break;
-
-			case 9:	// hex input mode
-				CFG.flags                        = CFG.flags |  SET_BASE;
-				CFG.base                         = 16;
-				break;
-
-			case 10:// oct input mode
-				CFG.flags                        = CFG.flags |  SET_BASE;
-				CFG.base                         = 8;
-				break;
-
-			case 11://hex prefix
-				CFG.flags                        = CFG.flags |  HEXLEAD;
-				break;
-
-			case 12://no hex prefix
-				CFG.flags                        = CFG.flags & ~HEXLEAD;
-				break;
-
-			case 13://hex prefix
-				CFG.flags                        = CFG.flags |  HEXTAIL;
-				break;
-
-			case 14://no hex prefix
-				CFG.flags                        = CFG.flags & ~HEXTAIL;
-				break;
-
-			case 'p':
-				CFG.flags                        = CFG.flags |  PADOFFSET;
-				CFG.pad_value                    = (uc) strtoull (optarg, NULL, CFG.base);
-				break;
-
-			case 15:// no pad offset
-				CFG.flags                        = CFG.flags & ~PADOFFSET;
-				CFG.pad_value                    = 0;
-				break;
-
-			case 16://ascii output
-				CFG.flags                        = CFG.flags |  ASCII;
-				break;
-				
-			case 17://no ascii output
-				CFG.flags                        = CFG.flags & ~ASCII;
-				break;
-				
-			case 'O':
-				if (*(optarg+0)                 == '+')
-					CFG.off_by                   = +1*(sc)strtoull((optarg+1), NULL, CFG.base);
-				else if (*(optarg+0)            == '-')
-					CFG.off_by                   = -1*(sc)strtoull((optarg+1), NULL, CFG.base);
-				else
-					CFG.off_by                   = -1*(sc)strtoull  (optarg,    NULL, CFG.base);
-				break;
-
-			case 'P':
-				CFG.prefix_bytes                 = atoll(optarg);
-				break;
-
-			case 'S':
-				CFG.suffix_bytes                 = atoll(optarg);
-				break;
-
-			case 18://input byte size
-				CFG.input_byte_size              = (uc) strtoull (optarg, NULL, CFG.base);
-				break;
-
-			case 19://output byte size
-				CFG.output_byte_size             = (uc) strtoull (optarg, NULL, CFG.base);
-				break;
-
-			case 20://little endian grouping
-				CFG.flags                        = CFG.flags & ~BIGENDIAN;
-				break;
-
-			case 21://big endian grouping
-				CFG.flags                        = CFG.flags |  BIGENDIAN;
-				break;
-
-			case 22://byte reverse group
-				CFG.flags                        = CFG.flags |  REVERSE;
-				break;
-				
-			case 'I':
-				CFG.flags                        = CFG.flags |  INVERT;
-				// need to capture specified bytes to invert
-				token                            = strtok_r(optarg, delim, &save);
-				while (token                    != NULL)
-				{
-					if (invByteList	            == NULL)
-					{
-						invByteList              = (InvertByte *) malloc (sizeof(InvertByte));
-						if (invByteList         == NULL)
-						{
-							fprintf(CFG.output, "Error allocating memory.\n");
-							exit(1);
-						}
-						invByteList    -> num    = strtoull (optarg, NULL, CFG.base);
-						invByteList    -> next   = NULL;
-						invByteListEnd           = invByteList;
-					}
-					else
-					{
-						invByteListEnd -> next   = (InvertByte *) malloc (sizeof(InvertByte));
-						if(invByteListEnd       == NULL)
-						{
-							fprintf(CFG.output, "Error allocating memory.\n");
-							exit(1);
-						}
-						invByteListEnd           = invByteListEnd -> next;
-						invByteListEnd -> num    = strtoull (optarg, NULL, CFG.base);
-						invByteListEnd -> next   = NULL;
-					}
-
-					token                        = strtok_r(optarg, delim, &save);
-				}
-				break;
-
-			case 's':
-				CFG.offset                       = strtoull (optarg, NULL, CFG.base);
+			case OPT_UNIMPLEMENTED:
+				die("option '--%s' is not yet implemented", long_options[idx].name);
 				break;
 
 			default:
-				display_usage(argv[0]);
+				display_usage();
 		}
-		c = getopt_long(argc,argv,"Ve:f:cLlm:qbHhp:P:S:I:s",long_options,&option_index);
 	}
 
-	if (optind                                  <  argc)
+	/* Without -e/-f, the first non-option argument is the PATTERN. */
+	if (pats->count == 0)
 	{
-		token                                    = strtok_r(argv[optind], delim, &save);
-		while (token                            != NULL)
-		{
-			if (patternList	                    == NULL)
-			{
-				patternList                      = (Pattern *) malloc (sizeof(Pattern));
-				if (patternList                 == NULL)
-				{
-					fprintf(CFG.output, "Error allocating memory.\n");
-					exit(1);
-				}
-				patternList            -> next   = NULL;
-				patternListEnd                   = patternList;
-			}
-			else
-			{
-				patternListEnd         -> next   = (Pattern *) malloc (sizeof(Pattern));
-				if (patternListEnd     -> next  == NULL)
-				{
-					fprintf(CFG.output, "Error allocating memory.\n");
-					exit(1);
-				}
-				patternListEnd                   = patternListEnd -> next;
-				patternListEnd         -> next   = NULL;
-			}
-
-			patternListEnd             -> regex  = (uc *)malloc(strlen(token)+1);
-			if (patternListEnd         -> regex == NULL)
-			{
-				fprintf(CFG.output, "Error allocating memory.\n");
-				exit(1);
-			}
-			patternListEnd             -> regex  = (uc *)memcpy(patternList -> regex, token, strlen(token)+1);
-			optind                               = optind + 1;
-			token                                = strtok_r(argv[optind], delim, &save);
-		}
-
-		if (optind                              >= argc) // no file, assume STDIN if NULL file list
-		{
-			load_file("-");
-			optind                               = optind + 1;
-		}
-
-		while (optind                           <  argc)
-		{
-			load_file(argv[optind]);
-			optind                               = optind + 1;
-		}
+		if (optind >= argc)
+			display_usage();
+		strlist_add(pats, argv[optind++]);
 	}
-	else
-	{
-		display_usage(argv[0]);
-	}
+
+	return optind;
 }
