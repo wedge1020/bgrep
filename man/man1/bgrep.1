@@ -1,4 +1,4 @@
-.TH BGREP 1 "bgrep 0.3" "User Commands"
+.TH BGREP 1 "bgrep 0.4" "User Commands"
 .SH NAME
 bgrep \- grep for binary data
 .
@@ -85,7 +85,10 @@ position); a match that does not is skipped and the search continues one
 character further on.  For this reason a pattern such as
 .B 8656
 does not match inside
-.BR 6865\^6c6c .
+.BR 6865\^6c6c ,
+unless
+.B \-\^\-half\-byte
+is given.
 .PP
 Regex mode reads each input completely into memory, using about three times
 its size.  The default mode streams its input in constant memory.
@@ -145,8 +148,8 @@ found, even if an error occurred earlier.
 .SS "Output line prefix control"
 .TP
 .BR \-b ", " \-\^\-byte\-offset
-Print the hexadecimal, 0-based offset of the start of each match
-(the default).
+Print the offset of each match before it (the default).  The base is
+described under \fBNumber formats\fP below.
 .TP
 .B \-\^\-no\-byte\-offset
 Do not print the offset.
@@ -162,6 +165,137 @@ Never prefix output lines with the file name.
 Use
 .I LABEL
 instead of \(lq(stdin)\(rq as the name of standard input.
+.SS "Input control"
+.TP
+.BI \-s " OFFSET" "\fR, \fP\-\^\-starting\-offset=" OFFSET
+Begin searching at byte
+.I OFFSET
+(default 0).  Reported offsets are still relative to the start of the file.
+Seekable files are seeked; pipes are read and discarded.
+.TP
+.B \-\^\-half\-byte
+Match on half-byte (nibble) boundaries.  Patterns may then have an odd number
+of digits, and a match may begin on either half of a byte.  A match starting
+on the low half of byte 2 has offset \fB2.5\fP (\(lq two and a half bytes\(rq),
+and is printed as the matched nibbles regrouped from the match start in
+pairs, so finding \fB8656\fP inside \fB68 65 6c\fP prints \fB86 56\fP.
+Combine with \fB\-\^\-last\-byte\fP to report the position of the last matched
+nibble.  Cannot be combined with context bytes, \fB\-I\fP, \fB\-\^\-ascii\fP or
+the grouping options.
+.SS "Offset reporting"
+In the case of several of these options, the last one given wins.
+.TP
+.B \-\^\-first\-byte
+Report the offset of the first byte of the match (default).
+.TP
+.B \-\^\-first\-byte\-with\-prefix
+Report the offset of the first byte shown, including leading context bytes.
+.TP
+.B \-\^\-last\-byte
+Report the offset of the last byte of the match.
+.TP
+.B \-\^\-last\-byte\-with\-suffix
+Report the offset of the last byte shown, including trailing context bytes.
+.SS "Number formats"
+Numeric option arguments (\fB\-m\fP, \fB\-s\fP, \fB\-A\fP, \fB\-B\fP, \fB\-P\fP,
+\fB\-S\fP, \fB\-O\fP, \fB\-I\fP, \fB\-g\fP, \fB\-p\fP) are interpreted in the
+base chosen here, wherever these options appear on the command line.
+.TP
+.B \-\^\-auto\-mode
+Arguments are decimal unless prefixed with \fB0x\fP (hexadecimal) or
+\fB0\fP (octal).  Offsets are printed in hexadecimal and counts (\fB\-c\fP)
+in decimal.  This is the default.
+.TP
+.B \-\^\-hex\-mode
+Arguments are hexadecimal (no \fB0x\fP needed) and offsets and counts are
+printed in hexadecimal.
+.TP
+.B \-\^\-oct\-mode
+Arguments are octal; offsets and counts are printed in octal.
+.TP
+.B \-\^\-dec\-mode
+Arguments are decimal; offsets and counts are printed in decimal.
+.TP
+.B \-\^\-hex\-prefix\fR, \fP\-\^\-no\-hex\-prefix
+Print (or do not print, the default) \fB0x\fP before hexadecimal offsets.
+.TP
+.B \-\^\-hex\-suffix\fR, \fP\-\^\-no\-hex\-suffix
+Print (or do not print, the default) \fBh\fP after hexadecimal offsets.
+.TP
+.BR \-p [\fIDIGITS\fP] ", " \-\^\-pad\-output [ =\fIDIGITS\fP ]
+Pad offsets with leading zeros: to \fIDIGITS\fP digits if given, otherwise to
+the width of the largest offset in the file (for pipes, 4 GiB is assumed).
+The argument must be attached (\fB\-p4\fP, not \fB\-p 4\fP).
+.TP
+.B \-\^\-no\-pad\-output
+Do not pad offsets (default).
+.SS "Context bytes"
+Context bytes are printed around the match, set off with \(lq | \(rq, and are
+clipped at the start and end of the file.  They are not matched against, and
+neighbouring matches may print the same context.  At most 1048576 bytes of
+context in either direction are supported.
+.TP
+.BI \-B " NUM" "\fR, \fP\-\^\-before\-bytes=" NUM
+Also print
+.I NUM
+bytes before the match.
+.TP
+.BI \-A " NUM" "\fR, \fP\-\^\-after\-bytes=" NUM
+Also print
+.I NUM
+bytes after the match.
+.TP
+.BI \-P " K" "\fR, \fP\-\^\-prefix\-num\-bytes=" K
+Print as many bytes before the match as the value of the \fIK\fPth byte
+(1-based) of the matched data.  This follows length fields in the data, whose
+size is not known when the pattern is written.  Added to \fB\-B\fP.  Ignored
+if the match has fewer than \fIK\fP bytes.
+.TP
+.BI \-S " K" "\fR, \fP\-\^\-suffix\-num\-bytes=" K
+Likewise for bytes after the match.  Added to \fB\-A\fP.
+.TP
+.BI \-O " \fR[\fP+|\-\fR]\fP" NUM "\fR, \fP\-\^\-off\-by=" [+|\-]NUM
+Adjust the counts obtained with \fB\-P\fP and \fB\-S\fP by \fINUM\fP, to allow
+for a length field that includes (or excludes) its own header.  \fB+\fP adds;
+\fB\-\fP subtracts; with no sign the adjustment is negative.  Counts never go
+below zero.
+.SS "Byte display and transforms"
+.TP
+.B \-\^\-ascii
+Append a hex-editor style rendering of everything printed, with
+non-printable bytes shown as \fB.\fP.
+.TP
+.B \-\^\-no\-ascii
+Do not (default).
+.TP
+.BI \-g " NUM" "\fR, \fP\-\^\-group\-size=" NUM
+Print bytes in groups of
+.I NUM
+bytes, each group joined together and groups separated by a space (as
+.BR xxd (1)
+does).  Default 1.  Maximum 4096.  The match, leading context and trailing
+context are each grouped separately.
+.TP
+.B \-\^\-big\-endian\-group
+Show the bytes of each group in stream order (default).
+.TP
+.B \-\^\-little\-endian\-group
+Show the bytes of each group last byte first, so a group reads as a
+little-endian number.
+.TP
+.B \-\^\-byte\-reverse\-group
+Reverse the order of the bytes shown in each group (applied after the
+endian option, so \fB\-\^\-little\-endian\-group \-\^\-byte\-reverse\-group\fP
+cancel out).
+.TP
+.B \-\^\-bit\-reverse\-group
+Reverse the order of all the bits in each group (the byte order reverses
+and the bits inside each byte reverse).
+.TP
+.BI \-I " K\fR[\fP,K...\fR]\fP" "\fR, \fP\-\^\-invert\-byte=" K
+Print the \fIK\fPth byte(s) (1-based) of the match with all bits inverted.
+May be given more than once.  The ASCII column shows the original bytes.
+Positions beyond the match are ignored.
 .SS "Miscellaneous"
 .TP
 .B \-\^\-help
@@ -170,36 +304,26 @@ Print a usage summary and exit.
 .BR \-V ", " \-\^\-version
 Print the version and license and exit.
 .SS "Planned options (not yet implemented)"
-The following options are recognized but currently exit with an error
-(status 2) and the message \(lqnot yet implemented\(rq.
-They are reserved for upcoming releases.
-.PP
-.nf
-Offset reporting:   \-\^\-first\-byte, \-\^\-first\-byte\-with\-prefix,
-                    \-\^\-last\-byte, \-\^\-last\-byte\-with\-suffix
-Number formats:     \-\^\-auto\-mode, \-\^\-hex\-mode, \-\^\-oct\-mode,
-                    \-\^\-hex\-prefix, \-\^\-no\-hex\-prefix,
-                    \-\^\-hex\-suffix, \-\^\-no\-hex\-suffix,
-                    \-p, \-\^\-pad\-output, \-\^\-no\-pad\-output
-Display:            \-\^\-ascii, \-\^\-no\-ascii
-Context bytes:      \-P, \-\^\-prefix\-num\-bytes, \-S, \-\^\-suffix\-num\-bytes
-Start offset:       \-s, \-\^\-starting\-offset
-Byte transforms:    \-I, \-\^\-invert\-byte, \-\^\-input\-byte, \-\^\-output\-byte,
-                    \-\^\-little\-endian\-group, \-\^\-big\-endian\-group,
-                    \-\^\-byte\-reverse\-group
-.fi
+.TP
+.BI \-\^\-input\-byte= BITS
+.TP
+.BI \-\^\-output\-byte= BITS
+Work with bytes of other than 8 bits.  Recognized but currently exit with
+status 2 and the message \(lqnot yet implemented\(rq.
 .
 .SH "OUTPUT FORMAT"
 Each match is printed on its own line as
 .PP
 .RS
-[\fIFILE\fP\fB:\fP][\fIOFFSET\fP\fB:\fP]\fIBB BB BB\fP...
+[\fIFILE\fP\fB:\fP][\fIOFFSET\fP\fB:\fP][\fIBEFORE\fP \fB|\fP] \fIBB BB BB\fP... [\fB|\fP \fIAFTER\fP]  [\fB|\fIascii\fB|\fR]
 .RE
 .PP
 where
 .I OFFSET
-is the hexadecimal offset of the first matched byte and the matched bytes
-follow as two-digit hexadecimal values separated by spaces.
+is the (by default hexadecimal) offset of the first matched byte and the
+bytes follow as two-digit hexadecimal values separated by spaces.  The
+optional parts appear according to \fB\-H\fP, \fB\-\^\-no\-byte\-offset\fP,
+the context options and \fB\-\^\-ascii\fP.
 .
 .SH "EXIT STATUS"
 .TP
@@ -230,6 +354,41 @@ Count ELF headers in a disk image:
 .PP
 .RS
 .B bgrep \-c \(aq7f 45 4c 46\(aq disk.img
+.RE
+.PP
+A record with a length byte at position 3 (\fBAB\fP, length): show the
+record header and the bytes the length field announces:
+.PP
+.RS
+.B bgrep \-S 3 \(aq41 42 ..\(aq records.bin
+.RE
+.PP
+The same, where the length counts its own two header bytes (so
+subtract 2 from it) and a hex-editor view is wanted:
+.PP
+.RS
+.B bgrep \-\-ascii \-S 3 \-O 2 \(aq41 42 ..\(aq records.bin
+.RE
+.PP
+Show 16 bytes of context on each side of a match, with decimal offsets
+padded to the file size:
+.PP
+.RS
+.B bgrep \-\-dec\-mode \-p \-B 16 \-A 16 \(aqde ad be ef\(aq core.dump
+.RE
+.PP
+View 32-bit little-endian words around a pattern:
+.PP
+.RS
+.B bgrep \-g 4 \-\-little\-endian\-group \-A 12 \(aq7f 45 4c 46\(aq a.out
+.RE
+.PP
+Find a bit pattern that straddles a byte boundary (the nibbles
+.B 8 6 5
+inside \(lq68 65\(rq):
+.PP
+.RS
+.B bgrep \-\-half\-byte 865 data.bin
 .RE
 .PP
 Search a pipe, showing only the bytes:
