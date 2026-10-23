@@ -1,245 +1,273 @@
-.TH BGREP 1 "bgrep 0.2" "User Commands" "Lab46 Commands Manual"
+.TH BGREP 1 "bgrep 0.3" "User Commands"
 .SH NAME
-bgrep - RegEx-capable grep for binary data
+bgrep \- grep for binary data
 .
 .SH SYNOPSIS
 .B bgrep
-.RI [ OPTIONS ]
+.RI [ OPTION ]\|.\|.\|.
 .I PATTERN
-.RI [ FILE .\|.\|.]
+.RI [ FILE ]\|.\|.\|.
 .br
+.B bgrep
+.RI [ OPTION ]\|.\|.\|.
+.RB { \-e " \fIPATTERN\fR | " \-f " \fIFILE\fR }\|.\|.\|."
+.RI [ FILE ]\|.\|.\|.
 .
 .SH DESCRIPTION
-Like similar tools of its ilk, 
 .B bgrep
 searches the named input
-.IR FILE (s)
-or standard input (STDIN) if no files are named (or the traditional single hyphen-minus 
-.RB ( \- )
-is given) for lines containing a binary match to the given 
-.IR PATTERN .
-By default, 
+.IR FILE s
+(or standard input if none are given, or if a
+.I FILE
+is
+.BR \- )
+for byte sequences that match
+.IR PATTERN ,
+and prints the offset and contents of each match.
+Where
+.BR grep (1)
+works on lines of text,
 .B bgrep
-prints the matching lines to standard output (STDOUT). Where tools like 
-.B grep
-work on textual data, 
-.B bgrep
-is specifically designed to work on binary data.
+works on arbitrary binary data: a known header, magic number or record
+layout can be located inside a file by describing it as hexadecimal.
 .PP
-Command-line options and even this manual page documentation borrows heavily from compatible information of
-.B grep
-\- as such, this documentation should be considered a derived work: no plagiarism is intended. The rationale is to provide a consistent interface and documentation to allow for easier use of conceptually-similar tools.
+Matches never overlap; after a match the search resumes just past its end.
+When several patterns match at the same position, the one given first wins.
+.PP
+The command-line interface and this page borrow heavily from
+.BR grep (1)
+so that the two feel alike.
+.
+.SH "PATTERN SYNTAX"
+A pattern is written in the hexadecimal notation of the bytes to find.
+.SS "Default (\-F): hex digits and wildcards"
+.PP
+The pattern is a string of hexadecimal digits (\fB0\-9a\-fA\-F\fP) in which
+a period
+.RB ( . )
+stands for any single hex digit (a \(lqnibble\(rq).
+White space is ignored.
+The number of digits (including wildcards) must be even.
+.PP
+.nf
+.RS
+68 65 6c 6c 6f      the bytes "hello"
+de ad be ef         DEADBEEF
+ff d8 ff ..         a JPEG start marker followed by any byte
+4. 50               a byte 0x40\-0x4f followed by 0x50
+.RE
+.fi
+.SS "Regular expressions (\-G, \-E)"
+With
+.B \-G
+or
+.B \-E
+the pattern is a POSIX basic or extended regular expression
+.RB ( regex (7))
+applied to the data rendered as continuous lowercase hexadecimal text
+(two characters per byte, no separators).
+White space in the pattern is removed and matching is case-insensitive.
+The period still matches one nibble, so
+.B ..
+matches one byte, and the full power of regular expressions is available:
+.PP
+.nf
+.RS
+\-E '504b(0304|0506)'           ZIP local header or end record
+\-E 'ff(d8|d9)'                 JPEG start or end marker
+\-E '00{8,}'                    eight or more zero bytes
+\-E '^7f454c46'                 an ELF header at the very start
+.RE
+.fi
+.PP
+Matches must start and end on a byte boundary (an even character
+position); a match that does not is skipped and the search continues one
+character further on.  For this reason a pattern such as
+.B 8656
+does not match inside
+.BR 6865\^6c6c .
+.PP
+Regex mode reads each input completely into memory, using about three times
+its size.  The default mode streams its input in constant memory.
 .
 .SH OPTIONS
-Some of these options are position sensitive due to the linear processing of the command-line arguments. Care should be taken to place them prior to options they could impact.
-.PP
-Improper ordering could result in inconsistent output or input processing errors.
-.SS "Generic Program Information"
+.SS "Pattern selection"
 .TP
-.BR \-\^\-help
-Print a usage message identifying the below command-line options and exit.
+.BR \-F ", " \-\^\-fixed
+Interpret patterns as hex digits and wildcards (the default).
 .TP
-.BR \-V ", " \-\^\-version
-Print the version of
-.B bgrep
-to standard output (STDOUT) and exit.
-.SS "Matching Control"
+.BR \-G ", " \-\^\-basic\-regexp
+Interpret patterns as POSIX basic regular expressions.
 .TP
-.BI \-e " PATTERN" "\fR,\fP \-\^\-regexp=" PATTERN
+.BR \-E ", " \-\^\-extended\-regexp
+Interpret patterns as POSIX extended regular expressions.
+.TP
+.BI \-e " PATTERN" "\fR, \fP\-\^\-regexp=" PATTERN
 Use
 .I PATTERN
-as the pattern. As with
-.BR grep ,
-this can be used to specify multiple search patterns.
+as a pattern.  May be given multiple times.  When
+.B \-e
+or
+.B \-f
+is used, no positional
+.I PATTERN
+is expected.
 .TP
-.BI \-f " FILE" "\fR,\fP \-\^\-file=" FILE
-Adds 
-.IR FILE
-to the queue of files to process, in search of any provided patterns.
-.SS "General Output Control"
+.BI \-f " FILE" "\fR, \fP\-\^\-file=" FILE
+Read patterns from
+.IR FILE ,
+one per line; blank lines are ignored.  Use
+.B \-
+for standard input.  Unlike earlier versions, \fB\-f\fP does
+.I not
+name a file to search; list files as ordinary arguments.
+.SS "General output control"
 .TP
 .BR \-c ", " \-\^\-count
-Suppress normal output; instead print a count of matching lines from all input files. Count is decimal unless preceded by a
-.B \-\^\-hex\-mode
-argument, in which case it will display in hexadecimal.
-.TP
-.BR \-L ", " \-\^\-files\-without\-match
-Suppress normal output; instead print the name of each input file from which no output would normally have been printed. The scanning will stop on the first match.
+Print only the number of matches in each file.
 .TP
 .BR \-l ", " \-\^\-files\-with\-matches
-Suppress normal output; instead print the name of each input file from which output would normally have been printed. The scanning will stop on the first match.
+Print only the names of files that contain a match.  Scanning of a file
+stops at its first match.
 .TP
-.BI \-m " NUM" "\fR,\fP \-\^\-max\-count=" NUM
+.BR \-L ", " \-\^\-files\-without\-match
+Print only the names of files that contain no match.
+.TP
+.BI \-m " NUM" "\fR, \fP\-\^\-max\-count=" NUM
 Stop reading a file after
 .I NUM
-matching lines (0 for unbounded). The default is for the max count to be unbounded, and for the value specified to be in decimal (although hexadecimal values can be specified with a leading '0x', and octal values with a leading '0').
+matches.  0 (the default) means no limit.  Decimal, hexadecimal
+(leading \fB0x\fP) and octal (leading \fB0\fP) are accepted.
 .TP
-.BR \-q ", " \-\^\-quiet
-Quiet operation mode; do not write anything to standard output. Exit immediately with zero status if any match is found, even if an error was detected.
-.SS "Output Line Prefix Control"
+.BR \-q ", " \-\^\-quiet ", " \-\^\-silent
+Write nothing; exit immediately with status 0 as soon as any match is
+found, even if an error occurred earlier.
+.SS "Output line prefix control"
 .TP
 .BR \-b ", " \-\^\-byte\-offset
-Print the hexadecimal 0-based byte offset within the input file before each line of output (default action).
+Print the hexadecimal, 0-based offset of the start of each match
+(the default).
 .TP
-.BR \-\^\-no\-byte\-offset
-Do not print the hexadecimal 0-based byte offset within the input file before each line of output. This would be similar to expected
-.B grep
-behavior.
+.B \-\^\-no\-byte\-offset
+Do not print the offset.
 .TP
 .BR \-H ", " \-\^\-with\-filename
-Print the file name for each match, preceding the byte offset if enabled. This is the default when there is more than one file to search.
+Prefix each output line with the file name.  This is the default when
+more than one file is searched.
 .TP
 .BR \-h ", " \-\^\-no\-filename
-Suppress the prefixing of file names on output. This is the default when there is only one file (or only standard input) to search.
+Never prefix output lines with the file name.
 .TP
 .BI \-\^\-label= LABEL
-Display input actually coming from standard input as input coming from file
-.IR LABEL .
-.SS "Offset Reporting"
+Use
+.I LABEL
+instead of \(lq(stdin)\(rq as the name of standard input.
+.SS "Miscellaneous"
+.TP
+.B \-\^\-help
+Print a usage summary and exit.
+.TP
+.BR \-V ", " \-\^\-version
+Print the version and license and exit.
+.SS "Planned options (not yet implemented)"
+The following options are recognized but currently exit with an error
+(status 2) and the message \(lqnot yet implemented\(rq.
+They are reserved for upcoming releases.
 .PP
-NOTE: In the case of multiple byte position reporting options for offset display, the last encountered option will be the one that is honored.
-.TP
-.BR \-\^\-first\-byte
-Print the offset of the first byte of the matched pattern (default action). This only considers the indicated \fBPATTERN\fR.
-.TP
-.BR \-\^\-first\-byte\-with\-prefix
-Print the offset of the first byte of the matched pattern, where the first byte includes any prefixed bytes (as indicated with \fB\-\-prefix\-num\-bytes\fR and \fB\-O\fR).
-.TP
-.BR \-\^\-last\-byte
-Print the offset of the last byte of the matched pattern. This only considers the indicated \fBPATTERN\fR.
-.TP
-.BR \-\^\-last\-byte\-with\-suffix
-Print the offset of the last byte of the matched pattern, where the last byte includes any suffixed bytes (as indicated with \fB\-\-suffix\-num\-bytes\fR and \fB\+O\fR).
-.SS "Offset Specification and Formatting"
-.TP
-.BR \-\^\-auto\-mode
-Assume offset-related argument options and context-specific program outputs are in decimal. This is the default operational mode. Hexadecimal and octal values can be provided as input, and displayed as output so long as a leading '0x' is prefixed for hexadecimal, or '0' is prefixed for octal.
-.TP
-.BR \-\^\-hex\-mode
-Assume offset-related argument options and context-specific program outputs are in hexadecimal (no need to provide leading '0x').
-.TP
-.BR \-\^\-oct\-mode
-Assume offset-related argument options and context-specific program outputs are in octal (no need to provide leading '0').
-.TP
-.BR \-\^\-hex\-prefix
-Print a "0x" prior to the reported offset.
-.TP
-.BR \-\^\-no\-hex\-prefix
-Do not print a "0x" prior to the reported offset (default action).
-.TP
-.BR \-\^\-hex\-suffix
-Print an "h" appended to the end of the reported offset.
-.TP
-.BR \-\^\-no\-hex\-suffix
-Do not print an "h" appended to the end of the reported offset (default action).
-.TP
-.BR \-p " \fIPOSITIONS" "\fR,\fP \-\^\-pad\-output" [ =\fIPOSITIONS\fP ]
-Pad reported offset with leading zeros. If no argument option is given, pad according to the estimated maximum offset (via an 
-.B lstat(2)
-size query on the processed file). If an argument option is given, pad zeros up to the indicated position.
-.TP
-.BR \-\^\-no\-pad\-output
-Do not pad the reported offset with leading zeros (default action).
-.TP
-.BR \-\^\-ascii
-Suffixed to the matched pattern (if set to display), display the data as rendered in ASCII. This is meant to be similar to what you would see in a hex editor.
-.TP
-.BR \-\^\-no\-ascii
-Do not display ASCII visualization of matched pattern (default action).
-.SS "Context Output Control"
-.TP
-.BI \-O " \fP[+|-]\fR\fINUM\fP"
-Assume an "off by" byte value in the indicated direction. If no direction is given, it defaults to negative. The default behavior is to be off by 0.
-.TP
-.BI \-P " MATCH_BYTE" "\fR,\fP \-\^\-prefix\-num\-bytes=" MATCH_BYTE
-Print "off by" number of bytes as found in a 1-based byte offset from start of matched result before the start of matched result output. This can be used for dynamic ranges of data that may be represented in the source data of the matched pattern and would be otherwise difficult to specify in a fixed pattern.
-.TP
-.BI \-S " MATCH_BYTE" "\fR,\fP \-\^\-suffix\-num\-bytes=" MATCH_BYTE
-Print "off by" number of bytes as found in a 1-based byte offset from start of matched result at the end of matched result output. This can be used for dynamic ranges of data that may be represented in the source data of the matched pattern and would be otherwise difficult to specify in a fixed pattern.
-.SS "Data Format Control"
-.TP
-.BR \-\^\-input\-byte =\fIBITS\fP
-Process input data with the assumption that a byte is \fBBITS\fR bits (default is 8). The acceptable range of values is 1-128.
-.TP
-.BR \-\^\-output\-byte =\fIBITS\fP
-Process output data with the assumption that a byte is \fBBITS\fR bits (default is 8). The acceptable range of values is 1-128.
-.TP
-.BR \-\^\-little\-endian\-group
-When bytes are selected by group, process grouped bytes in little endian orientation.
-.TP
-.BR \-\^\-big\-endian\-group
-When bytes are selected by group, process grouped bytes in big endian orientation (default action).
-.TP
-.BR \-\^\-byte\-reverse\-group
-When bytes are selected by group, reverse the order of the grouped bytes in output.
-.TP
-.BR \-\^\-bit\-reverse\-group (UNIMPLEMENTED)
-When bytes are selected by group, reverse the order of the bits in the grouped bytes in output.
-.TP
-.BR \-I " \fIBYTE" "\fR,\fP \-\^\-invert\-byte" =\fIBYTE\fP
-For the indicated 1-based byte offset from the start of the matched pattern, invert the bits.
-.SS "Offset Manipulation"
-.TP
-.BR \-s ", " \-\^\-starting\-offset =\fIOFFSET\fP
-Start processing source data at 0-based given hexadecimal offset (default is 0).
+.nf
+Offset reporting:   \-\^\-first\-byte, \-\^\-first\-byte\-with\-prefix,
+                    \-\^\-last\-byte, \-\^\-last\-byte\-with\-suffix
+Number formats:     \-\^\-auto\-mode, \-\^\-hex\-mode, \-\^\-oct\-mode,
+                    \-\^\-hex\-prefix, \-\^\-no\-hex\-prefix,
+                    \-\^\-hex\-suffix, \-\^\-no\-hex\-suffix,
+                    \-p, \-\^\-pad\-output, \-\^\-no\-pad\-output
+Display:            \-\^\-ascii, \-\^\-no\-ascii
+Context bytes:      \-P, \-\^\-prefix\-num\-bytes, \-S, \-\^\-suffix\-num\-bytes
+Start offset:       \-s, \-\^\-starting\-offset
+Byte transforms:    \-I, \-\^\-invert\-byte, \-\^\-input\-byte, \-\^\-output\-byte,
+                    \-\^\-little\-endian\-group, \-\^\-big\-endian\-group,
+                    \-\^\-byte\-reverse\-group
+.fi
 .
-.SH "REGULAR EXPRESSIONS"
-A regular expression is a pattern that describes a set of strings. Regular expressions are constructed analogously to arithmetic expressions, by using various operators to combine smaller expressions.
+.SH "OUTPUT FORMAT"
+Each match is printed on its own line as
 .PP
-.B bgrep
-understands a selected subset of "basic" and "extended" regular expressions, which will be described below.
+.RS
+[\fIFILE\fP\fB:\fP][\fIOFFSET\fP\fB:\fP]\fIBB BB BB\fP...
+.RE
 .PP
-The fundamental building blocks are the regular expressions that match a half a byte (4 bits if a byte is 8 bits). The hexadecimal values 0-9a-f are regular expressions that match themselves.
-.PP
-The period
-.B .\&
-matches any half byte sequence (upper or lower).
-.SS "Character Classes and Bracket Expressions"
-A
-.I "bracket expression"
-is a list of characters enclosed by
-.B [
-and
-.BR ] .
-It matches for a half-byte any single value in that list; if the first value of the list is the caret
-.B ^
-then it matches any value
-.I not
-in the list.
-For example, the regular expression
-.B [0123456789abcdef]
-matches any single hexadecimal value.
-.PP
-.SS Concatenation
-Two regular expressions may be concatenated; the resulting regular expression matches any sequence of values formed by concatenating two sub-sequences that respectively match the concatenated expressions.
+where
+.I OFFSET
+is the hexadecimal offset of the first matched byte and the matched bytes
+follow as two-digit hexadecimal values separated by spaces.
+.
 .SH "EXIT STATUS"
-The exit status is 0 if selected patterns are found, and 1 if not found. If an error occurred the exit status is 2.
-.
-.SH NOTES
-The intent of
-.B bgrep
-is to facilitate the analysis of binary data in a file, by allowing the convenience of grep-style pattern matching (Regular Expressions). It was originally designed to aid with the viewing of data generated by a consumer EEG device, and as such may be less optimal for other scenarios.
-.PP
-A search of other "binary grep" solutions on the internet turned up some other solutions, but they proved to be too simple or not adequate for this particular application. So if this utility doesn't meet your needs, be sure to seek out some of the others (by the same name).
+.TP
+.B 0
+At least one match was found (with \fB\-L\fP: at least one file was listed).
+.TP
+.B 1
+No match was found.
+.TP
+.B 2
+An error occurred (bad option or pattern, unreadable file, ...).  This
+takes precedence over 0 and 1, except that \fB\-q\fP exits 0 on a match.
 .
 .SH EXAMPLES
-Examples will someday go here.
+Find the string \(lqhello\(rq followed by a NUL byte:
+.PP
+.RS
+.B bgrep \(aq68 65 6c 6c 6f 00\(aq data.bin
+.RE
+.PP
+List the files in a tree that begin with a PNG signature:
+.PP
+.RS
+.B find . \-type f \-exec bgrep \-lE \(aq^89504e470d0a1a0a\(aq {} +
+.RE
+.PP
+Count ELF headers in a disk image:
+.PP
+.RS
+.B bgrep \-c \(aq7f 45 4c 46\(aq disk.img
+.RE
+.PP
+Search a pipe, showing only the bytes:
+.PP
+.RS
+.B dd if=/dev/sda bs=1M count=64 | bgrep \-\-no\-byte\-offset \(aqff d8 ff ..\(aq
+.RE
+.PP
+Several patterns, from a file:
+.PP
+.RS
+.B bgrep \-f magic.txt firmware.bin
+.RE
+.
+.SH NOTES
+.B bgrep
+was originally written to examine data from a consumer EEG device.
 .
 .SH BUGS
-.SS "Reporting Bugs"
-Email bug reports to
+In regex mode, if the leftmost-longest match at some position ends on a
+half byte, a shorter byte-aligned match at the same position is not
+considered; the search moves on instead.
+.PP
+Report bugs to
 .RB < wedge1020+bgrep@gmail.com >
-.SS "Known Bugs"
-I'm sure there are plenty, and hopefully they will eventually be reported here.
+or at
+.BR https://github.com/wedge1020/bgrep .
 .
 .SH COPYRIGHT
-Copyright 2015 Matthew Haas
+Copyright 2015\-2026 Matthew Haas.
 .PP
-This is free software;
-see the source for copying conditions.
-There is NO warranty;
-not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+This is free software, licensed under the GNU General Public License,
+version 3 or later; see the source for copying conditions.
+There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.
 .
 .SH "SEE ALSO"
-grep(1), regex(7).
-.
+.BR grep (1),
+.BR regex (7),
+.BR hexdump (1),
+.BR xxd (1)
