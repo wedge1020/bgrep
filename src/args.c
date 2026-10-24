@@ -5,8 +5,9 @@
  * seen, so that --hex-mode / --oct-mode / --dec-mode affect them wherever
  * they appear on the command line.
  *
- * --input-byte and --output-byte (non-8-bit bytes) are still recognised but
- * report "not yet implemented".
+ * The model: the input is a bitstream cut into --input-byte bit "bytes"; an
+ * --align grid says where matches may start; --output-byte says how matched
+ * bits are regrouped for display.
  */
 #include <errno.h>
 #include <getopt.h>
@@ -40,7 +41,14 @@ enum
 	OPT_BYTE_REVERSE,
 	OPT_BIT_REVERSE,
 	OPT_HALF_BYTE,
-	OPT_UNIMPLEMENTED
+	OPT_ALIGN,
+	OPT_INPUT_BYTE,
+	OPT_OUTPUT_BYTE,
+	OPT_LSB_FIRST,
+	OPT_MSB_FIRST,
+	OPT_BINARY,
+	OPT_BIT_OFFSET,
+	OPT_NO_BIT_OFFSET
 };
 
 #define SHORT_OPTS  "Ve:f:cLlm:qbHhFGEp::P:S:I:s:O:A:B:g:"
@@ -54,7 +62,13 @@ static const struct option long_options[] =
 	{ "fixed",                  no_argument,       NULL, 'F'             },
 	{ "basic-regexp",           no_argument,       NULL, 'G'             },
 	{ "extended-regexp",        no_argument,       NULL, 'E'             },
+	{ "binary",                 no_argument,       NULL, OPT_BINARY      },
 	{ "half-byte",              no_argument,       NULL, OPT_HALF_BYTE   },
+	{ "align",                  required_argument, NULL, OPT_ALIGN       },
+	{ "input-byte",             required_argument, NULL, OPT_INPUT_BYTE  },
+	{ "output-byte",            required_argument, NULL, OPT_OUTPUT_BYTE },
+	{ "lsb-first",              no_argument,       NULL, OPT_LSB_FIRST   },
+	{ "msb-first",              no_argument,       NULL, OPT_MSB_FIRST   },
 	{ "count",                  no_argument,       NULL, 'c'             },
 	{ "files-without-match",    no_argument,       NULL, 'L'             },
 	{ "files-with-matches",     no_argument,       NULL, 'l'             },
@@ -76,6 +90,8 @@ static const struct option long_options[] =
 	{ "hex-mode",               no_argument,       NULL, OPT_HEX         },
 	{ "oct-mode",               no_argument,       NULL, OPT_OCT         },
 	{ "dec-mode",               no_argument,       NULL, OPT_DEC         },
+	{ "bit-offset",             no_argument,       NULL, OPT_BIT_OFFSET  },
+	{ "no-bit-offset",          no_argument,       NULL, OPT_NO_BIT_OFFSET },
 	{ "hex-prefix",             no_argument,       NULL, OPT_HEX_PREFIX  },
 	{ "no-hex-prefix",          no_argument,       NULL, OPT_NO_HEX_PREFIX },
 	{ "hex-suffix",             no_argument,       NULL, OPT_HEX_SUFFIX  },
@@ -98,9 +114,6 @@ static const struct option long_options[] =
 	{ "byte-reverse-group",     no_argument,       NULL, OPT_BYTE_REVERSE },
 	{ "bit-reverse-group",      no_argument,       NULL, OPT_BIT_REVERSE },
 
-	/* documented in bgrep(1), planned, not yet implemented */
-	{ "input-byte",             required_argument, NULL, OPT_UNIMPLEMENTED },
-	{ "output-byte",            required_argument, NULL, OPT_UNIMPLEMENTED },
 	{ NULL,                     0,                 NULL, 0               }
 };
 
@@ -173,11 +186,6 @@ static void parse_invert_list(const char *arg, Config *cfg, int base)
 	free(copy);
 }
 
-static void conflict(const char *what)
-{
-	die("--half-byte cannot be combined with %s", what);
-}
-
 /*
  * Parse argv into cfg and pats.  Returns the index of the first FILE
  * argument (== argc when none were given).
@@ -191,6 +199,7 @@ int parse_args(int argc, char **argv, Config *cfg, StrList *pats)
 	const char *a_max    = NULL, *a_start = NULL, *a_pad   = NULL;
 	const char *a_before = NULL, *a_after = NULL, *a_group = NULL;
 	const char *a_pre    = NULL, *a_suf   = NULL, *a_off   = NULL;
+	const char *a_in     = NULL, *a_out   = NULL, *a_align = NULL;
 	StrList     inv      = { NULL, 0, 0 };
 	size_t      i;
 
@@ -203,6 +212,8 @@ int parse_args(int argc, char **argv, Config *cfg, StrList *pats)
 	cfg->base          = BASE_AUTO;
 	cfg->offset_style  = OFF_FIRST;
 	cfg->group_size    = 1;
+	cfg->in_bits       = 8;
+	cfg->out_bits      = 8;
 
 	while ((c = getopt_long(argc, argv, SHORT_OPTS, long_options, &idx)) != -1)
 	{
@@ -215,7 +226,15 @@ int parse_args(int argc, char **argv, Config *cfg, StrList *pats)
 			case 'F':           cfg->mode = MODE_NIBBLE;           break;
 			case 'G':           cfg->mode = MODE_BRE;              break;
 			case 'E':           cfg->mode = MODE_ERE;              break;
-			case OPT_HALF_BYTE: cfg->half_byte     = 1;            break;
+			case OPT_BINARY:    cfg->binary        = 1;            break;
+			case OPT_HALF_BYTE: a_align = "4"; cfg->align_set = 1; break;
+			case OPT_ALIGN:     a_align = optarg; cfg->align_set = 1; break;
+			case OPT_INPUT_BYTE:  a_in  = optarg;                  break;
+			case OPT_OUTPUT_BYTE: a_out = optarg;                  break;
+			case OPT_LSB_FIRST: cfg->lsb_first     = 1;            break;
+			case OPT_MSB_FIRST: cfg->lsb_first     = 0;            break;
+			case OPT_BIT_OFFSET:    cfg->bit_offset = 1;           break;
+			case OPT_NO_BIT_OFFSET: cfg->bit_offset = 0;           break;
 			case 'c':           cfg->count_only    = 1;            break;
 			case 'L':           cfg->list = LIST_NONMATCHING;      break;
 			case 'l':           cfg->list = LIST_MATCHING;         break;
@@ -258,10 +277,6 @@ int parse_args(int argc, char **argv, Config *cfg, StrList *pats)
 			case OPT_BYTE_REVERSE: cfg->byte_reverse = 1;          break;
 			case OPT_BIT_REVERSE:  cfg->bit_reverse  = 1;          break;
 
-			case OPT_UNIMPLEMENTED:
-				die("option '--%s' is not yet implemented", long_options[idx].name);
-				break;
-
 			default:
 				display_usage();
 		}
@@ -269,6 +284,13 @@ int parse_args(int argc, char **argv, Config *cfg, StrList *pats)
 
 	/* Now that the base is settled, convert the numeric arguments. */
 	base = cfg_in_base(cfg);
+	if (a_in)     cfg->in_bits      = (unsigned) parse_bounded(a_in,  "--input-byte",  base, BITS_MAX);
+	if (a_out)    cfg->out_bits     = (unsigned) parse_bounded(a_out, "--output-byte", base, BITS_MAX);
+	if (cfg->in_bits == 0)  die("--input-byte must be at least 1");
+	if (cfg->out_bits == 0) die("--output-byte must be at least 1");
+	cfg->align = a_align ? (unsigned) parse_bounded(a_align, "--align", base, ALIGN_MAX)
+	                     : cfg->in_bits;
+	if (cfg->align == 0)    die("--align must be at least 1");
 	if (a_max)    cfg->max_count    = parse_number(a_max,    "--max-count", base);
 	if (a_start)  cfg->start_offset = parse_number(a_start,  "--starting-offset", base);
 	if (a_pad)    cfg->pad          = (int) parse_bounded(a_pad, "--pad-output", base, 64);
@@ -295,23 +317,32 @@ int parse_args(int argc, char **argv, Config *cfg, StrList *pats)
 	if (a_suf && cfg->suffix_idx == 0)
 		die("--suffix-num-bytes positions start at 1");
 
-	/* The most context any one match can ask for bounds the scan window. */
-	cfg->max_before = (size_t) cfg->before_fixed +
-	                  (cfg->prefix_idx ? 255 + (size_t) (cfg->off_by < 0 ? -cfg->off_by : cfg->off_by) : 0);
-	cfg->max_after  = (size_t) cfg->after_fixed +
-	                  (cfg->suffix_idx ? 255 + (size_t) (cfg->off_by < 0 ? -cfg->off_by : cfg->off_by) : 0);
-	if (cfg->max_before > CONTEXT_MAX || cfg->max_after > CONTEXT_MAX)
-		die("context size too large (maximum %lu bytes)", CONTEXT_MAX);
+	cfg->start_bits = cfg->start_offset * cfg->in_bits;
+	if (cfg->start_offset != 0 && cfg->start_bits / cfg->in_bits != cfg->start_offset)
+		die("--starting-offset is too large");
 
-	if (cfg->half_byte)
+	/*
+	 * The most context any one match can ask for bounds the scan window.
+	 * A -P/-S count comes from one input byte, so it is at most 2^N - 1
+	 * (unbounded in practice once N > 8).
+	 */
 	{
-		if (cfg->max_before || cfg->max_after)  conflict("context bytes (-A, -B, -P, -S)");
-		if (cfg->ninvert)                        conflict("--invert-byte");
-		if (cfg->ascii)                          conflict("--ascii");
-		if (cfg->group_size != 1 || cfg->little_endian ||
-		    cfg->byte_reverse || cfg->bit_reverse)
-			conflict("group options");
+		ulli adj = (ulli) (cfg->off_by < 0 ? -cfg->off_by : cfg->off_by);
+		ulli dyn = cfg->in_bits <= 8 ? ((1ULL << cfg->in_bits) - 1) + adj : CONTEXT_MAX;
+		ulli mb  = cfg->before_fixed + (cfg->prefix_idx ? dyn : 0);
+		ulli ma  = cfg->after_fixed  + (cfg->suffix_idx ? dyn : 0);
+
+		cfg->max_before = (size_t) (mb > CONTEXT_MAX ? CONTEXT_MAX : mb);
+		cfg->max_after  = (size_t) (ma > CONTEXT_MAX ? CONTEXT_MAX : ma);
 	}
+
+	if (cfg->ascii && cfg->out_bits > 8)
+		die("--ascii needs --output-byte of at most 8");
+	if (cfg->mode != MODE_NIBBLE && cfg->align != cfg->in_bits && cfg->lsb_first)
+		die("--align different from --input-byte cannot be combined with "
+		    "--lsb-first in regular-expression mode");
+	if (cfg->mode != MODE_NIBBLE && cfg->binary && cfg->in_bits * 8 > 8 * 128)
+		die("input byte too wide for --binary");
 
 	/* Without -e/-f, the first non-option argument is the PATTERN. */
 	if (pats->count == 0)

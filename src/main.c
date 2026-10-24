@@ -12,7 +12,8 @@
 #include "bgrep.h"
 
 /*
- * Digits needed to print any offset of a regular file in the output base;
+ * Digits needed to print any offset of a regular file in the output base
+ * (offsets count input bytes, or bits with --bit-offset);
  * for pipes and other unsized input assume offsets below 4 GiB.
  */
 static int auto_pad_width(const Config *cfg, FILE *fp)
@@ -21,8 +22,9 @@ static int auto_pad_width(const Config *cfg, FILE *fp)
 	ulli        last = 0xFFFFFFFFULL;
 
 	if (fstat(fileno(fp), &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0)
-		last = (ulli) st.st_size - 1;
-	if (last < cfg->start_offset)
+		last = cfg->bit_offset ? (ulli) st.st_size * 8 - 1
+		                       : ((ulli) st.st_size * 8 - 1) / cfg->in_bits;
+	if (!cfg->bit_offset && last < cfg->start_offset)
 		last = cfg->start_offset;
 	return number_width(last, cfg_out_base(cfg, 0));
 }
@@ -75,8 +77,8 @@ int main(int argc, char **argv)
 		sink.show_name = cfg.with_filename;
 		sink.pad_width = cfg.pad > 0 ? cfg.pad : 0;
 		sink.count     = 0;
-		sink.scratch     = NULL;
-		sink.scratch_cap = 0;
+		sink.bits      = NULL;
+		sink.bits_cap  = 0;
 
 		if (fp == NULL)
 		{
@@ -95,7 +97,7 @@ int main(int argc, char **argv)
 		}
 		if (!is_stdin)
 			fclose(fp);
-		free(sink.scratch);
+		free(sink.bits);
 
 		if (cfg.list == LIST_MATCHING && sink.count > 0)
 			puts(sink.name);

@@ -145,16 +145,83 @@ check "negative number"          "" 2 "$BG" -s -1 ab "$T/b.bin"
 check "option order irrelevant"  "10:ff" 0 "$BG" -s 0x10 --hex-mode ff "$T/o.bin"
 
 # ---- half-byte matching --------------------------------------------------
-check "half-byte odd offset"     "2.5:86 56" 0 "$BG" --half-byte -m1 8656 "$T/a.bin"
-check "half-byte odd digits"     "2.5:86 5" 0 "$BG" --half-byte -m1 865 "$T/a.bin"
-check "half-byte wildcard"       "2.5:86 5" 0 "$BG" --half-byte -m1 '8.5' "$T/a.bin"
+check "half-byte odd offset"     "2+4:86 56" 0 "$BG" --half-byte -m1 8656 "$T/a.bin"
+check "half-byte odd digits"     "2+4:86 5" 0 "$BG" --half-byte -m1 865 "$T/a.bin"
+check "half-byte wildcard"       "2+4:86 5" 0 "$BG" --half-byte -m1 '8.5' "$T/a.bin"
 check "half-byte aligned"        "2:68 65" 0 "$BG" --half-byte -m1 6865 "$T/a.bin"
-check "half-byte ERE"            "2.5:86 56" 0 "$BG" --half-byte -E -m1 8656 "$T/a.bin"
-check "half-byte last offset"    "4:86 56" 0 "$BG" --half-byte --last-byte -m1 8656 "$T/a.bin"
+check "half-byte ERE"            "2+4:86 56" 0 "$BG" --half-byte -E -m1 8656 "$T/a.bin"
+check "half-byte last offset"    "3+4:86 56" 0 "$BG" --half-byte --last-byte -m1 8656 "$T/a.bin"
 check "odd digits need flag"     "" 2 "$BG" 865 "$T/a.bin"
-check "half-byte + -A rejected"  "" 2 "$BG" --half-byte -A 1 865 "$T/a.bin"
-check "half-byte + ascii"        "" 2 "$BG" --half-byte --ascii 865 "$T/a.bin"
-check "half-byte + -I"           "" 2 "$BG" --half-byte -I 1 865 "$T/a.bin"
+check "half-byte + -A"           "2+4:86 5 | 6c" 0 "$BG" --half-byte -m1 -A 1 865 "$T/a.bin"
+check "half-byte + ascii"        "2+4:86 5  |.|" 0 "$BG" --half-byte -m1 --ascii 865 "$T/a.bin"
+check "half-byte + -I"           "2+4:79 5" 0 "$BG" --half-byte -m1 -I 1 865 "$T/a.bin"
+
+# ---- bitstream model: --input-byte / --output-byte / --align -------------
+printf '\253\315\357' > "$T/w12.bin"                    # ab cd ef = 12-bit abc def
+printf 'ABC' > "$T/w6.bin"                              # 41 42 43 = 6-bit 10 14 09 03
+printf '\350\062\233\375\006' > "$T/gsm.bin"            # "hello" in GSM 7-bit packing
+printf '\200\001' > "$T/bit.bin"
+
+check "12-bit units, 8-bit view" "0:ab cd ef" 0 "$BG" --input-byte=12 'abc def' "$T/w12.bin"
+check "12-bit units, 12-bit out" "0:abc def" 0 "$BG" --input-byte=12 --output-byte=12 'abc def' "$T/w12.bin"
+check "12-bit unit offset"       "1:def" 0 "$BG" --input-byte=12 --output-byte=12 def "$T/w12.bin"
+check "12-bit misaligned"        "" 1 "$BG" --input-byte=12 bcd "$T/w12.bin"
+check "12-bit --align=4"         "0+4:bcd" 0 "$BG" --input-byte=12 --output-byte=12 --align=4 bcd "$T/w12.bin"
+check "12-bit whole bytes only"  "" 2 "$BG" --input-byte=12 abcd "$T/w12.bin"
+check "12-bit bit offset"        "c:de f" 0 "$BG" --input-byte=12 --bit-offset def "$T/w12.bin"
+check "bit offset (8-bit, hex)"  "80:ff" 0 "$BG" --bit-offset ff "$T/o.bin"
+check "bit offset (dec)"         "128:ff" 0 "$BG" --dec-mode --bit-offset ff "$T/o.bin"
+check "12-bit -s absolute"       "1:def" 0 "$BG" --input-byte=12 --output-byte=12 -s 1 def "$T/w12.bin"
+check "12-bit -s skips"          "" 1 "$BG" --input-byte=12 --output-byte=12 -s 1 abc "$T/w12.bin"
+check "12-bit context after"     "0:abc | def" 0 "$BG" --input-byte=12 --output-byte=12 -A 1 abc "$T/w12.bin"
+check "12-bit context before"    "1:abc | def" 0 "$BG" --input-byte=12 --output-byte=12 -B 1 def "$T/w12.bin"
+check "12-bit -S from unit value" "0:abc | def" 0 "$BG" --input-byte=12 --output-byte=12 -S 1 abc "$T/w12.bin"
+check "12-bit invert"            "0:543" 0 "$BG" --input-byte=12 --output-byte=12 -I 1 abc "$T/w12.bin"
+check "6-bit units"              "1:14 09" 0 "$BG" --input-byte=6 --output-byte=6 '14 09' "$T/w6.bin"
+check "6-bit, 8-bit view"        "1:50 9" 0 "$BG" --input-byte=6 '14 09' "$T/w6.bin"
+check "6-bit wildcard digit"     "1:14 09" 0 "$BG" --input-byte=6 --output-byte=6 '.4 0.' "$T/w6.bin"
+check "6-bit leading digit range" "" 2 "$BG" --input-byte=6 '40' "$T/w6.bin"
+check "6-bit binary"             "1:14 09" 0 "$BG" --binary --input-byte=6 --output-byte=6 '010100 001001' "$T/w6.bin"
+check "6-bit binary wildcards"   "1:14 09" 0 "$BG" --binary --input-byte=6 --output-byte=6 '0101.. 00....' "$T/w6.bin"
+check "6-bit regex (hex text)"   "1:14 09" 0 "$BG" -E --input-byte=6 --output-byte=6 '1409' "$T/w6.bin"
+check "6-bit regex (binary)"     "1:14 09" 0 "$BG" -E --binary --input-byte=6 --output-byte=6 '010100001001' "$T/w6.bin"
+check "12-bit regex"             "0:abc" 0 "$BG" -E --input-byte=12 --output-byte=12 'abc' "$T/w12.bin"
+check "12-bit regex misaligned"  "" 1 "$BG" -E --input-byte=12 --output-byte=12 'bcd' "$T/w12.bin"
+check "12-bit regex --align=4"   "0+4:bcd" 0 "$BG" -E --input-byte=12 --output-byte=12 --align=4 'bcd' "$T/w12.bin"
+check "GSM 7-bit septets"        "0:68 65 6c 6c 6f" 0 "$BG" --lsb-first --input-byte=7 --output-byte=7 '68 65 6c 6c 6f' "$T/gsm.bin"
+check "GSM 7-bit ascii"          "0:68 65 6c 6c 6f  |hello|" 0 "$BG" --lsb-first --input-byte=7 --output-byte=7 --ascii '68 65 6c 6c 6f' "$T/gsm.bin"
+check "GSM back to octets"       "0:e8 32 9b fd 6~" 0 "$BG" --lsb-first --input-byte=7 '68 65 6c 6c 6f' "$T/gsm.bin"
+check "GSM regex"                "0:68 65 6c 6c 6f" 0 "$BG" -E --lsb-first --input-byte=7 --output-byte=7 '68656c6c6f' "$T/gsm.bin"
+check "lsb-first 8-bit same"     "0:ab cd ef" 0 "$BG" --lsb-first 'ab cd ef' "$T/w12.bin"
+check "msb-first overrides lsb"  "0:ab cd ef" 0 "$BG" --lsb-first --msb-first 'ab cd ef' "$T/w12.bin"
+check "lsb-first partial pattern" "" 2 "$BG" --lsb-first --half-byte 'abc' "$T/w12.bin"
+check "1-bit pattern, --align=1" "0:8~
+1+7:8~" 0 "$BG" --binary --align=1 1 "$T/bit.bin"
+check "output-byte=4"            "0:a b c d" 0 "$BG" --output-byte=4 'ab cd' "$T/w12.bin"
+check "output-byte=4 grouped"    "0:ab cd" 0 "$BG" --output-byte=4 -g 2 'ab cd' "$T/w12.bin"
+check "output-byte=16"           "0:abcd ef" 0 "$BG" --output-byte=16 'ab cd ef' "$T/w12.bin"
+check "ascii needs out<=8"       "" 2 "$BG" --ascii --output-byte=9 ab "$T/w12.bin"
+check "input-byte 0"             "" 2 "$BG" --input-byte=0 ab "$T/w12.bin"
+check "input-byte 129"           "" 2 "$BG" --input-byte=129 ab "$T/w12.bin"
+check "output-byte 129"          "" 2 "$BG" --output-byte=129 ab "$T/w12.bin"
+printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ012345' > "$T/alpha.bin"      # two 128-bit units
+printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' > "$T/alpha26.bin"          # second unit incomplete
+check "128-bit bytes"            "0:4142434445464748494a4b4c4d4e4f50" 0 "$BG" --input-byte=128 --output-byte=128 '4142434445464748494a4b4c4d4e4f50' "$T/alpha.bin"
+check "128-bit second unit"      "1:5152535455565758595a303132333435" 0 "$BG" --input-byte=128 --output-byte=128 '5152535455565758595a303132333435' "$T/alpha.bin"
+check "128-bit context"          "0:4142434445464748494a4b4c4d4e4f50 | 5152535455565758595a303132333435" 0 "$BG" --input-byte=128 --output-byte=128 -A 1 '4142434445464748494a4b4c4d4e4f50' "$T/alpha.bin"
+check "128-bit -s"               "1:5152535455565758595a303132333435" 0 "$BG" --input-byte=128 --output-byte=128 -s 1 '5152535455565758595a303132333435' "$T/alpha.bin"
+check "128-bit partial tail"     "" 2 "$BG" --input-byte=128 '5152535455565758595a' "$T/alpha26.bin"
+check "128-bit tail not a unit"  "0:4142434445464748494a4b4c4d4e4f50" 0 "$BG" --input-byte=128 --output-byte=128 -A 1 '4142434445464748494a4b4c4d4e4f50' "$T/alpha26.bin"
+
+# the alignment grid stays anchored at the origin after a short match
+check "grid stays anchored"      "0:0~
+1:0~
+2:0~
+3:0~" 0 "$BG" --binary --input-byte=6 --align=6 0 "$T/w6.bin"
+check "grid with -s"             "1:0~
+2:0~
+3:0~" 0 "$BG" --binary --input-byte=6 --align=6 -s 1 0 "$T/w6.bin"
+check "stride past end of data"  "" 1 "$BG" --input-byte=8 --align=4096 --binary 1111 "$T/w6.bin"
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

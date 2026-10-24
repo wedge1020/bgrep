@@ -14,7 +14,7 @@
 #define BGREP_COPYRIGHT  "2015-2026"
 #define BGREP_EMAIL      "wedge1020+bgrep@gmail.com"
 #define BGREP_URL        "https://github.com/wedge1020/bgrep"
-#define BGREP_VERSION    "0.4"
+#define BGREP_VERSION    "0.5"
 
 /* Exit statuses, as documented in bgrep(1). */
 #define BG_MATCH         0		/* something matched */
@@ -58,8 +58,10 @@ typedef enum
 } OffsetStyle;
 
 /* Limits on user-supplied sizes (keeps the streaming window bounded). */
-#define CONTEXT_MAX      (1UL << 20)
+#define CONTEXT_MAX      (1UL << 20)		/* context units each way */
 #define GROUP_MAX        4096
+#define BITS_MAX         128			/* largest --input-byte/--output-byte */
+#define ALIGN_MAX        4096
 
 /* Run-time settings, filled in by parse_args(). */
 typedef struct
@@ -73,8 +75,17 @@ typedef struct
 	int           with_filename;	/* -H / -h; -1 means "decide by file count" */
 	ulli          max_count;		/* -m; 0 means unbounded */
 	const char   *label;			/* name shown for standard input */
-	ulli          start_offset;		/* -s: begin reading here */
-	int           half_byte;		/* --half-byte: nibble-granular matching */
+	ulli          start_offset;		/* -s: begin reading here (in input bytes) */
+	ulli          start_bits;		/* computed: start_offset * in_bits */
+
+	/* bitstream model: input is cut into in_bits-wide "bytes" */
+	unsigned      in_bits;			/* --input-byte, 1..128 (default 8) */
+	unsigned      out_bits;			/* --output-byte, 1..128 (default 8) */
+	unsigned      align;			/* bits between candidate match starts */
+	int           align_set;		/* --align/--half-byte: patterns may end mid-byte */
+	int           lsb_first;		/* --lsb-first: bit 0 of each file byte comes first */
+	int           binary;			/* --binary: patterns are 0/1/. per bit */
+	int           bit_offset;		/* --bit-offset: report offsets in bits */
 
 	/* offset formatting */
 	BaseMode      base;
@@ -89,8 +100,8 @@ typedef struct
 	unsigned      prefix_idx;		/* -P: 1-based match byte holding a "bytes before" count */
 	unsigned      suffix_idx;		/* -S: 1-based match byte holding a "bytes after" count */
 	long long     off_by;			/* -O: adjustment to the -P/-S counts */
-	size_t        max_before;		/* computed: most leading context ever needed */
-	size_t        max_after;		/* computed: most trailing context ever needed */
+	size_t        max_before;		/* computed: most leading context units needed */
+	size_t        max_after;		/* computed: most trailing context units needed */
 
 	/* byte display and transforms */
 	int           ascii;			/* --ascii column */
@@ -114,19 +125,31 @@ typedef struct
 } StrList;
 
 /*
- * A compiled pattern.  In MODE_NIBBLE, nibble k of the pattern is stored in
- * the high (even k) or low (odd k) half of byte k/2 of value[] and mask[]:
- * input matches when (data & mask) == value; mask nibbles are 0xF for a
- * literal hex digit and 0x0 for a '.' wildcard.  In the regex modes, 're'
- * is compiled instead.
+ * A compiled pattern.  For the fixed modes the pattern is a string of
+ * 'nbits' bits in *stream order* (the order the bits come out of the file,
+ * which already accounts for --lsb-first): bit i must equal bv[i] wherever
+ * bm[i] is 1.  'value'/'mask' hold the same thing packed into bytes, laid
+ * out like the file's own bytes, for fast comparison at byte boundaries.
+ * In the regex modes, 're' is compiled instead.
  */
 typedef struct
 {
-	size_t        nibs;				/* nibbles matched (nibble mode only) */
+	size_t        nbits;
+	uc           *bv;
+	uc           *bm;
+	size_t        nbytes;			/* ceil(nbits / 8) */
 	uc           *value;
 	uc           *mask;
 	regex_t       re;
 } Pattern;
+
+/* Bit 'pos' of the stream: MSB-first by default, LSB-first on request. */
+static inline int stream_bit(const uc *buf, ulli pos, int lsb_first)
+{
+	unsigned sh = (unsigned) (pos & 7);
+
+	return ((buf[pos >> 3] >> (lsb_first ? sh : 7 - sh)) & 1);
+}
 
 /* Per-file reporting state, shared between the scanners and emit(). */
 typedef struct
@@ -136,8 +159,8 @@ typedef struct
 	int           show_name;
 	int           pad_width;		/* digits to pad offsets to (0 = none) */
 	ulli          count;
-	uc           *scratch;			/* work buffer for -I */
-	size_t        scratch_cap;
+	uc           *bits;				/* work buffer: one byte per bit */
+	size_t        bits_cap;
 } Sink;
 
 extern const char *progname;
@@ -161,6 +184,7 @@ int    scan_file(FILE *, const Pattern *, size_t, Sink *);
 
 /* output.c */
 int    emit(Sink *, const uc *, size_t, ulli, size_t, size_t);
+				/* sink, window, window bytes, file offset of window, bit pos, bits */
 void   put_number(const Config *, ulli, int, int, int);
 int    number_width(ulli, int);
 

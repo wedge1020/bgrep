@@ -7,8 +7,9 @@ void display_help(void)
 {
 	printf("Usage: %s [OPTION]... PATTERN [FILE]...\n", progname);
 	printf("Search for byte PATTERN in each FILE or standard input.\n");
-	printf("PATTERN is a string of hex digits in which '.' matches any single\n");
-	printf("hex digit (nibble); whitespace is ignored.  See -E and -G for regexes.\n");
+	printf("PATTERN is a string of hex digits describing the bytes to find, in which\n");
+	printf("'.' matches any single digit; whitespace is ignored.  See -E and -G for\n");
+	printf("regexes, --binary for bit patterns and --input-byte for non-8-bit bytes.\n");
 	printf("Example: %s '68 65 .. .. 6f 00' data1.file data2.file\n\n", progname);
 
 	printf("Pattern selection:\n");
@@ -17,8 +18,17 @@ void display_help(void)
 	printf("  -E, --extended-regexp        PATTERN is a POSIX extended regex over hex text\n");
 	printf("  -e, --regexp=PATTERN         use PATTERN (may be given more than once)\n");
 	printf("  -f, --file=FILE              read patterns from FILE, one per line\n");
-	printf("      --half-byte              match on half-byte (nibble) boundaries\n");
-	printf("  -s, --starting-offset=N      begin searching at byte offset N\n\n");
+	printf("      --binary                 PATTERN digits are 0, 1 and '.' per bit\n");
+	printf("  -s, --starting-offset=N      begin searching at input byte N\n\n");
+
+	printf("Bitstream model:\n");
+	printf("      --input-byte=BITS        treat input as BITS-bit bytes (1-128, default 8)\n");
+	printf("      --output-byte=BITS       regroup output into BITS-bit bytes (default 8)\n");
+	printf("      --align=BITS             matches may start every BITS bits (default: input byte)\n");
+	printf("      --half-byte              same as --align=4: match on nibble boundaries\n");
+	printf("      --lsb-first              bit 0 of each file byte comes first (default: msb)\n");
+	printf("      --msb-first              the default\n");
+	printf("      --bit-offset             report offsets in bits\n\n");
 
 	printf("Output control:\n");
 	printf("  -c, --count                  print only a count of matches per file\n");

@@ -19,15 +19,21 @@ Output is `[file:][offset:]bytes`, with the offset in hexadecimal by default.
   data rendered as hex text, for alternation, repetition and anchors:
   `bgrep -E 'ff(d8|d9)'`, `bgrep -E '00{8,}'`. These modes load each input
   fully into memory.
-* **`--half-byte`:** match on nibble boundaries; patterns may have an odd
-  number of digits and a match may start mid-byte (offset shown as `2.5`).
+* **Bitstream model:** the input is a stream of bits cut into
+  `--input-byte=N`-bit "bytes" (1-128, default 8), so packed 6-, 7-, 10-, 12-
+  or 14-bit data can be searched directly, with `--lsb-first` for formats that
+  fill bytes from the low bit. `--output-byte=M` regroups what is displayed,
+  `--align=BITS` (or `--half-byte` = `--align=4`) lets matches start off the
+  byte grid (offset shown as `2+4`: two bytes and four bits), and `--binary`
+  writes patterns one bit per symbol.
 * Several patterns: repeat `-e`, or put them one per line in a file for `-f`.
 
 ## Options at a glance
 
 | Area | Options |
 |---|---|
-| Pattern | `-F` `-G` `-E` `-e PAT` `-f FILE` `--half-byte` |
+| Pattern | `-F` `-G` `-E` `-e PAT` `-f FILE` `--binary` |
+| Bitstream | `--input-byte=N` `--output-byte=M` `--align=B` `--half-byte` `--lsb-first` `--msb-first` `--bit-offset` |
 | Selection | `-c` `-l` `-L` `-m N` `-q` `-s OFFSET` |
 | Prefix | `-b` `--no-byte-offset` `-H` `-h` `--label=L` |
 | Offset | `--first-byte[-with-prefix]` `--last-byte[-with-suffix]` |
@@ -45,8 +51,13 @@ Exit status is 0 on a match, 1 on none, 2 on error. See `man bgrep` (or
 `man ./man/man1/bgrep.1`) for the full reference and `docs/` for worked
 examples and design notes.
 
-Not yet implemented: `--input-byte` and `--output-byte` (bytes of other than
-8 bits); they exit with an error.
+Some examples of the bitstream options:
+
+    $ bgrep --input-byte=12 --output-byte=12 'abc def' samples.bin   # 12-bit values
+    $ bgrep --lsb-first --input-byte=7 --output-byte=7 --ascii '68 65 6c 6c 6f' sms.bin
+    0:68 65 6c 6c 6f  |hello|                                         # GSM 7-bit "hello"
+    $ bgrep --half-byte 865 data.bin                                  # nibbles inside 68 65
+    2+4:86 5
 
 ## Building
 

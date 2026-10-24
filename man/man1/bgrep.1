@@ -1,4 +1,4 @@
-.TH BGREP 1 "bgrep 0.4" "User Commands"
+.TH BGREP 1 "bgrep 0.5" "User Commands"
 .SH NAME
 bgrep \- grep for binary data
 .
@@ -31,23 +31,79 @@ works on lines of text,
 works on arbitrary binary data: a known header, magic number or record
 layout can be located inside a file by describing it as hexadecimal.
 .PP
-Matches never overlap; after a match the search resumes just past its end.
+Matches never overlap; after a match the search resumes at the first
+candidate position after its end (see \fBBITSTREAM MODEL\fP).
 When several patterns match at the same position, the one given first wins.
 .PP
 The command-line interface and this page borrow heavily from
 .BR grep (1)
 so that the two feel alike.
 .
+.SH "BITSTREAM MODEL"
+.B bgrep
+sees its input as a stream of bits and divides it into "bytes" of
+.B \-\^\-input\-byte
+bits (default 8; 1 to 128).  Packed data such as 6, 7, 10, 12 or 14 bit
+samples can thus be searched and displayed directly.
+.IP \(bu 3
+Bits are taken in order, most significant bit of each file byte first
+(the default) or least significant first with
+.BR \-\^\-lsb\-first .
+.IP \(bu 3
+The first input byte starts at the beginning of the input, or at
+.B \-\^\-starting\-offset
+(which counts input bytes).
+.IP \(bu 3
+A match may begin every
+.B \-\^\-align
+bits counted from there.  By default that is every input byte, so matches are
+byte aligned.  A smaller alignment finds data that is not aligned to the
+byte grid;
+.B \-\^\-half\-byte
+is
+.BR \-\^\-align=4 .
+After a match, scanning resumes at the next alignment position past its end.
+.IP \(bu 3
+Offsets are reported in input bytes (plus a remainder in bits, written
+.BR + BITS ,
+when a match is off the input-byte grid), or in bits with
+.BR \-\^\-bit\-offset .
+.IP \(bu 3
+Matched bits (and context) are displayed regrouped into
+.B \-\^\-output\-byte
+bit units (default 8; 1 to 128).  With the defaults this reproduces the
+original file bytes.  A final unit shorter than the others shows only the
+digits it covers, with a \fB~\fP appended if its length is not a whole
+number of hex digits.
+.PP
+Examples: three file bytes \fBab cd ef\fP are the two 12-bit input bytes
+\fBabc def\fP;  the bytes \fB41 42 43\fP are the four 6-bit input bytes
+\fB10 14 09 03\fP; GSM 7-bit packed text is searched with
+\fB\-\^\-lsb\-first \-\^\-input\-byte=7\fP and shown as plain septet values with
+\fB\-\^\-output\-byte=7\fP.
+.
 .SH "PATTERN SYNTAX"
-A pattern is written in the hexadecimal notation of the bytes to find.
+A pattern describes input bytes, written in hexadecimal.
 .SS "Default (\-F): hex digits and wildcards"
 .PP
-The pattern is a string of hexadecimal digits (\fB0\-9a\-fA\-F\fP) in which
-a period
+Each input byte is written as ceil(BITS/4) hex digits holding its numeric
+value; for the default 8-bit byte that is two digits.  A period
 .RB ( . )
-stands for any single hex digit (a \(lqnibble\(rq).
+stands for any single hex digit.
 White space is ignored.
-The number of digits (including wildcards) must be even.
+When the byte width is not a multiple of 4 the leading digit holds only the
+remaining bits, so it must be small enough to fit (for 6-bit bytes,
+\fB0\fP to \fB3\fP), and a \fB.\fP there matches just those bits.
+.PP
+The pattern must be a whole number of input bytes (for 8-bit bytes, an even
+number of digits), unless
+.B \-\^\-align
+or
+.B \-\^\-half\-byte
+is given, which also permits a short final byte (for 8-bit bytes, an odd
+number of digits; with other widths, hex digits only when the width is a
+multiple of 4).  A short final byte is not allowed with
+.BR \-\^\-lsb\-first .
 .PP
 .nf
 .RS
@@ -55,6 +111,24 @@ The number of digits (including wildcards) must be even.
 de ad be ef         DEADBEEF
 ff d8 ff ..         a JPEG start marker followed by any byte
 4. 50               a byte 0x40\-0x4f followed by 0x50
+abc def             two 12\-bit bytes (with \-\^\-input\-byte=12)
+.RE
+.fi
+.SS "Binary patterns (\-\^\-binary)"
+With
+.B \-\^\-binary
+every symbol is a single bit:
+.BR 0 ,
+.B 1
+or
+.B .
+(any bit).  White space is ignored.  This is the natural notation for
+byte widths that are not a multiple of 4:
+.PP
+.nf
+.RS
+\-\^\-binary \-\^\-input\-byte=6 '010100 001001'    the 6\-bit bytes 14 and 09
+\-\^\-binary \-\^\-align=1 '1111 0000 .....'       a bit pattern anywhere
 .RE
 .fi
 .SS "Regular expressions (\-G, \-E)"
@@ -64,12 +138,19 @@ or
 .B \-E
 the pattern is a POSIX basic or extended regular expression
 .RB ( regex (7))
-applied to the data rendered as continuous lowercase hexadecimal text
-(two characters per byte, no separators).
+applied to the data rendered as text: each input byte as ceil(BITS/4)
+lowercase hex digits (or, with
+.BR \-\^\-binary ,
+BITS characters
+.B 0
+and
+.BR 1 ),
+with no separators.
 White space in the pattern is removed and matching is case-insensitive.
-The period still matches one nibble, so
+The period matches one text character (a hex digit, or one bit), so
 .B ..
-matches one byte, and the full power of regular expressions is available:
+matches one 8-bit byte, and the full power of regular expressions is
+available:
 .PP
 .nf
 .RS
@@ -80,18 +161,22 @@ matches one byte, and the full power of regular expressions is available:
 .RE
 .fi
 .PP
-Matches must start and end on a byte boundary (an even character
-position); a match that does not is skipped and the search continues one
-character further on.  For this reason a pattern such as
+Matches must start and end on an input-byte boundary; a match that does not
+is skipped and the search continues one character further on.  A pattern
+such as
 .B 8656
-does not match inside
+therefore does not match inside
 .BR 6865\^6c6c ,
 unless
-.B \-\^\-half\-byte
-is given.
+.B \-\^\-align
+(or \fB\-\^\-half\-byte\fP) permits it: matches then need only start on the
+alignment grid.  That combination is not supported together with
+.B \-\^\-lsb\-first
+in regex mode.
 .PP
 Regex mode reads each input completely into memory, using about three times
-its size.  The default mode streams its input in constant memory.
+its size (about eight times with \fB\-\^\-binary\fP).  The default mode
+streams its input in constant memory.
 .
 .SH OPTIONS
 .SS "Pattern selection"
@@ -104,6 +189,9 @@ Interpret patterns as POSIX basic regular expressions.
 .TP
 .BR \-E ", " \-\^\-extended\-regexp
 Interpret patterns as POSIX extended regular expressions.
+.TP
+.B \-\^\-binary
+Patterns are written one bit per symbol (\fB0\fP, \fB1\fP, \fB.\fP).
 .TP
 .BI \-e " PATTERN" "\fR, \fP\-\^\-regexp=" PATTERN
 Use
@@ -165,23 +253,47 @@ Never prefix output lines with the file name.
 Use
 .I LABEL
 instead of \(lq(stdin)\(rq as the name of standard input.
-.SS "Input control"
+.SS "Input control and bitstream options"
 .TP
 .BI \-s " OFFSET" "\fR, \fP\-\^\-starting\-offset=" OFFSET
-Begin searching at byte
+Begin searching at input byte
 .I OFFSET
-(default 0).  Reported offsets are still relative to the start of the file.
+(default 0).  Offsets are still reported from the start of the file.
 Seekable files are seeked; pipes are read and discarded.
 .TP
+.BI \-\^\-input\-byte= BITS
+Treat the input as bytes of
+.I BITS
+bits (1 to 128, default 8).  See \fBBITSTREAM MODEL\fP.
+.TP
+.BI \-\^\-output\-byte= BITS
+Show matches regrouped into bytes of
+.I BITS
+bits (1 to 128, default 8).  Reported offsets are not affected.
+.TP
+.BI \-\^\-align= BITS
+Allow matches to begin every
+.I BITS
+bits counted from the starting offset (default: the input byte size).
+Also lets patterns end part-way through an input byte.
+.TP
 .B \-\^\-half\-byte
-Match on half-byte (nibble) boundaries.  Patterns may then have an odd number
-of digits, and a match may begin on either half of a byte.  A match starting
-on the low half of byte 2 has offset \fB2.5\fP (\(lq two and a half bytes\(rq),
-and is printed as the matched nibbles regrouped from the match start in
-pairs, so finding \fB8656\fP inside \fB68 65 6c\fP prints \fB86 56\fP.
-Combine with \fB\-\^\-last\-byte\fP to report the position of the last matched
-nibble.  Cannot be combined with context bytes, \fB\-I\fP, \fB\-\^\-ascii\fP or
-the grouping options.
+Shorthand for \fB\-\^\-align=4\fP: match on nibble boundaries.
+Finding \fB8656\fP inside \fB68 65 6c\fP reports offset \fB2+4\fP and
+prints \fB86 56\fP.
+.TP
+.B \-\^\-lsb\-first
+Take the bits of each file byte starting from the least significant bit.
+This is how many packed formats (such as GSM 7-bit text) are laid out.
+.TP
+.B \-\^\-msb\-first
+Take bits most significant first (the default).
+.TP
+.B \-\^\-bit\-offset
+Report offsets as bit positions rather than input bytes.
+.TP
+.B \-\^\-no\-bit\-offset
+Report offsets in input bytes (the default).
 .SS "Offset reporting"
 In the case of several of these options, the last one given wins.
 .TP
@@ -197,8 +309,11 @@ Report the offset of the last byte of the match.
 .B \-\^\-last\-byte\-with\-suffix
 Report the offset of the last byte shown, including trailing context bytes.
 .SS "Number formats"
+Offsets are in input bytes.  The remainder, when a match is not on the input
+byte grid, follows as \fB+\fP and a decimal number of bits.
 Numeric option arguments (\fB\-m\fP, \fB\-s\fP, \fB\-A\fP, \fB\-B\fP, \fB\-P\fP,
-\fB\-S\fP, \fB\-O\fP, \fB\-I\fP, \fB\-g\fP, \fB\-p\fP) are interpreted in the
+\fB\-S\fP, \fB\-O\fP, \fB\-I\fP, \fB\-g\fP, \fB\-p\fP, \fB\-\^\-input\-byte\fP,
+\fB\-\^\-output\-byte\fP, \fB\-\^\-align\fP) are interpreted in the
 base chosen here, wherever these options appear on the command line.
 .TP
 .B \-\^\-auto\-mode
@@ -230,9 +345,10 @@ The argument must be attached (\fB\-p4\fP, not \fB\-p 4\fP).
 .B \-\^\-no\-pad\-output
 Do not pad offsets (default).
 .SS "Context bytes"
-Context bytes are printed around the match, set off with \(lq | \(rq, and are
-clipped at the start and end of the file.  They are not matched against, and
-neighbouring matches may print the same context.  At most 1048576 bytes of
+Context is counted in input bytes.  It is printed around the match, set off
+with \(lq | \(rq, and is clipped at the start and end of the input (a final
+incomplete input byte is not shown).  They are not matched against, and
+neighbouring matches may print the same context.  At most 1048576 input bytes of
 context in either direction are supported.
 .TP
 .BI \-B " NUM" "\fR, \fP\-\^\-before\-bytes=" NUM
@@ -246,8 +362,8 @@ Also print
 bytes after the match.
 .TP
 .BI \-P " K" "\fR, \fP\-\^\-prefix\-num\-bytes=" K
-Print as many bytes before the match as the value of the \fIK\fPth byte
-(1-based) of the matched data.  This follows length fields in the data, whose
+Print as many input bytes before the match as the value of the \fIK\fPth input
+byte (1-based) of the matched data.  This follows length fields in the data, whose
 size is not known when the pattern is written.  Added to \fB\-B\fP.  Ignored
 if the match has fewer than \fIK\fP bytes.
 .TP
@@ -263,15 +379,16 @@ below zero.
 .TP
 .B \-\^\-ascii
 Append a hex-editor style rendering of everything printed, with
-non-printable bytes shown as \fB.\fP.
+non-printable bytes shown as \fB.\fP.  Requires \fB\-\^\-output\-byte\fP of
+at most 8.
 .TP
 .B \-\^\-no\-ascii
 Do not (default).
 .TP
 .BI \-g " NUM" "\fR, \fP\-\^\-group\-size=" NUM
-Print bytes in groups of
+Print output bytes in groups of
 .I NUM
-bytes, each group joined together and groups separated by a space (as
+output bytes, each group joined together and groups separated by a space (as
 .BR xxd (1)
 does).  Default 1.  Maximum 4096.  The match, leading context and trailing
 context are each grouped separately.
@@ -293,7 +410,8 @@ Reverse the order of all the bits in each group (the byte order reverses
 and the bits inside each byte reverse).
 .TP
 .BI \-I " K\fR[\fP,K...\fR]\fP" "\fR, \fP\-\^\-invert\-byte=" K
-Print the \fIK\fPth byte(s) (1-based) of the match with all bits inverted.
+Print the \fIK\fPth input byte(s) (1-based) of the match with all of their bits
+inverted.
 May be given more than once.  The ASCII column shows the original bytes.
 Positions beyond the match are ignored.
 .SS "Miscellaneous"
@@ -303,13 +421,6 @@ Print a usage summary and exit.
 .TP
 .BR \-V ", " \-\^\-version
 Print the version and license and exit.
-.SS "Planned options (not yet implemented)"
-.TP
-.BI \-\^\-input\-byte= BITS
-.TP
-.BI \-\^\-output\-byte= BITS
-Work with bytes of other than 8 bits.  Recognized but currently exit with
-status 2 and the message \(lqnot yet implemented\(rq.
 .
 .SH "OUTPUT FORMAT"
 Each match is printed on its own line as
@@ -320,8 +431,10 @@ Each match is printed on its own line as
 .PP
 where
 .I OFFSET
-is the (by default hexadecimal) offset of the first matched byte and the
-bytes follow as two-digit hexadecimal values separated by spaces.  The
+is the (by default hexadecimal) offset of the first matched input byte, with
+\fB+\fP\fIBITS\fP appended for a match that starts part-way through one, and
+the output bytes follow as hexadecimal values (two digits each by default)
+separated by spaces.  The
 optional parts appear according to \fB\-H\fP, \fB\-\^\-no\-byte\-offset\fP,
 the context options and \fB\-\^\-ascii\fP.
 .
@@ -385,10 +498,30 @@ View 32-bit little-endian words around a pattern:
 .PP
 Find a bit pattern that straddles a byte boundary (the nibbles
 .B 8 6 5
-inside \(lq68 65\(rq):
+inside \(lq68 65\(rq); the offset is reported as \fB2+4\fP:
 .PP
 .RS
 .B bgrep \-\-half\-byte 865 data.bin
+.RE
+.PP
+Search 12-bit packed samples for the values 0x123 then 0x456, showing the
+match as 12-bit values and its position in input bytes:
+.PP
+.RS
+.B bgrep \-\-input\-byte=12 \-\-output\-byte=12 \(aq123 456\(aq samples.bin
+.RE
+.PP
+Find the text \(lqhello\(rq in GSM 7-bit packed data (least significant
+bit first) and see it as plain septets:
+.PP
+.RS
+.B bgrep \-\-lsb\-first \-\-input\-byte=7 \-\-output\-byte=7 \-\-ascii \(aq68 65 6c 6c 6f\(aq sms.bin
+.RE
+.PP
+Report where a flag bit pattern occurs, in bits:
+.PP
+.RS
+.B bgrep \-\-binary \-\-align=1 \-\-bit\-offset \(aq1010 0101\(aq dump.bin
 .RE
 .PP
 Search a pipe, showing only the bytes:
@@ -409,8 +542,11 @@ was originally written to examine data from a consumer EEG device.
 .
 .SH BUGS
 In regex mode, if the leftmost-longest match at some position ends on a
-half byte, a shorter byte-aligned match at the same position is not
-considered; the search moves on instead.
+character that is not on an input-byte boundary, a shorter aligned match at
+the same position is not considered; the search moves on instead.
+.PP
+Fixed patterns are compared bit by bit when a candidate does not start on a
+file-byte boundary, which is slower than the aligned case.
 .PP
 Report bugs to
 .RB < wedge1020+bgrep@gmail.com >

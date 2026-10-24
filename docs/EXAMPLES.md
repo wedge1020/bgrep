@@ -54,3 +54,26 @@ Fixed context works like `grep -B/-A`:
 
     printf 'dead beef\n7f454c46\n' > magic.txt
     bgrep -f magic.txt firmware.bin
+
+## Packed and odd-width data (bitstream options)
+
+Think of the file as a stream of bits cut into `--input-byte` bit "bytes":
+
+    # 12-bit samples packed in 3-byte pairs: ab cd ef = 12-bit abc, def
+    bgrep --input-byte=12 --output-byte=12 'abc def' samples.bin   # 0:abc def
+    bgrep --input-byte=12 'abc def' samples.bin                    # 0:ab cd ef (8-bit view)
+
+    # 6-bit bytes: 41 42 43 is 10 14 09 03
+    bgrep --input-byte=6 --output-byte=6 '14 09' x.bin             # 1:14 09
+    bgrep --binary --input-byte=6 --output-byte=6 '0101.. 00....' x.bin
+
+    # GSM 7-bit packed text (LSB first): see it as characters
+    bgrep --lsb-first --input-byte=7 --output-byte=7 --ascii '68 65 6c 6c 6f' sms.bin
+    0:68 65 6c 6c 6f  |hello|
+
+    # matches that are not on the byte grid
+    bgrep --half-byte 865 data.bin             # 2+4:86 5   (2 bytes + 4 bits in)
+    bgrep --binary --align=1 --bit-offset '1010 0101' dump.bin   # offsets in bits
+
+Context, `-I`, `-s`, `-m` and offsets all count *input* bytes. `-g` groups, and
+`--ascii` renders, *output* bytes.
